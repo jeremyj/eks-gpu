@@ -16,10 +16,22 @@ import subprocess
 import sys
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
-from eks_ami_parser_fix import EKSAMIParser
+from eks_ami_parser import EKSAMIParser
 
 
 @dataclass
+class DriverAlignment:
+    strategy: str
+    k8s_version: str
+    ami_release_version: str
+    ami_driver_version: str
+    container_driver_version: str
+    formatted_driver_version: str
+    deb_urls: List[str]
+    nodegroup_config: Dict
+
+
+class EKSNodegroupManager:
 class DriverAlignment:
     strategy: str
     k8s_version: str
@@ -212,7 +224,7 @@ class EKSNodegroupManager:
         return ami_version, k8s_ver, ami_type, kmod_version  # Return the actual driver version too
     
     def create_nodegroup_from_template(self, template_path: str = None, template_config: Dict = None, 
-                                      overrides: Dict = None, dry_run: bool = False) -> Dict:
+                                      overrides: Dict = None) -> Dict:
         """Create EKS nodegroup using a JSON template with optional overrides."""
         
         # Load template
@@ -229,7 +241,9 @@ class EKSNodegroupManager:
             config = template_config.copy()
             print(f"📋 Using provided template configuration")
         else:
-            raise Exception("Either template_path or template_config must be provided")
+            # Use default template when none provided
+            config = self._get_default_nodegroup_template()
+            print(f"📋 Using default nodegroup template")
         
         # Apply overrides
         if overrides:
@@ -245,14 +259,11 @@ class EKSNodegroupManager:
         
         # Validate required fields
         required_fields = ['clusterName', 'nodegroupName', 'nodeRole', 'subnets']
-        missing_fields = [field for field in required_fields if field not in config]
+        missing_fields = [field for field in required_fields if field not in config or not config[field]]
         if missing_fields:
-            raise Exception(f"Missing required fields in template: {missing_fields}")
-        
-        if dry_run:
-            print("\n🔍 Would create nodegroup with configuration:")
-            print(json.dumps(config, indent=2))
-            return {"dry_run": True, "config": config}
+            raise Exception(f"Missing required fields in configuration: {missing_fields}. " +
+                          f"These must be provided either in the template file or via command line arguments: " +
+                          f"--cluster-name, --nodegroup-name, --node-role-arn, --subnet-ids")
         
         # Build AWS CLI command
         cmd = [
@@ -319,7 +330,32 @@ class EKSNodegroupManager:
         if result.returncode != 0:
             raise Exception(f"Failed to create nodegroup: {result.stderr}")
         
-        return json.loads(result.stdout)
+        # Handle empty response (nodegroup creation is async, may not return JSON immediately)
+        if result.stdout.strip():
+            try:
+                return json.loads(result.stdout)
+            except json.JSONDecodeError:
+                # If JSON parsing fails, return a success indicator with the raw output
+                return {"success": True, "raw_output": result.stdout.strip()}
+        else:
+            return {"success": True, "message": "Nodegroup creation initiated (no immediate response)"}
+    
+    def _get_default_nodegroup_template(self) -> Dict:
+        """Return a default nodegroup template from file - no hardcoded fallback."""
+        # Try to read from nodegroup_template.json
+        default_template_path = "nodegroup_template.json"
+        
+        if os.path.exists(default_template_path):
+            try:
+                with open(default_template_path, 'r') as f:
+                    template = json.load(f)
+                print(f"📋 Using default template from: {default_template_path}")
+                return template
+            except (FileNotFoundError, json.JSONDecodeError) as e:
+                raise Exception(f"Error reading {default_template_path}: {e}")
+        
+        # No fallback - require template file or command line parameters
+        raise Exception(f"Template file {default_template_path} not found. Either create this file or use --template to specify a custom template path.")
 
 
 class NVIDIADriverResolver:
@@ -436,16 +472,6 @@ class DriverAlignmentOrchestrator:
             ubuntu_version=config.get('ubuntu_version', 'ubuntu2204'),
             debug=self.debug
         )
-        
-        # Initialize Bitbucket API if credentials provided
-        self.bitbucket_api = None
-        if all(key in config for key in ['bitbucket_workspace', 'bitbucket_repo', 'bitbucket_username', 'bitbucket_app_password']):
-            self.bitbucket_api = BitbucketAPI(
-                workspace=config['bitbucket_workspace'],
-                repo_slug=config['bitbucket_repo'],
-                username=config['bitbucket_username'],
-                app_password=config['bitbucket_app_password']
-            )
     
     def align_drivers_ami_first(self, k8s_version: str, cluster_name: str = None) -> DriverAlignment:
         """Strategy 1: Use latest AMI, update container drivers to match."""
@@ -469,14 +495,6 @@ class DriverAlignmentOrchestrator:
         # Resolve container driver URLs
         formatted_driver_version, deb_urls = self.driver_resolver.find_deb_urls(ami_driver_version)
         
-        # Prepare Bitbucket variables to update
-        bitbucket_vars = {
-            'NVIDIA_DRIVER_VERSION': ami_driver_version,
-            'NVIDIA_DRIVER_VER': formatted_driver_version,
-            'EKS_AMI_RELEASE_VERSION': ami_version,
-            'K8S_VERSION': k8s_version  # Track K8s version for reference
-        }
-        
         # Prepare nodegroup config
         nodegroup_config = {
             'ami_release_version': ami_version,
@@ -492,7 +510,6 @@ class DriverAlignmentOrchestrator:
             container_driver_version=ami_driver_version,
             formatted_driver_version=formatted_driver_version,
             deb_urls=deb_urls,
-            bitbucket_vars_to_update=bitbucket_vars,
             nodegroup_config=nodegroup_config
         )
     
@@ -561,14 +578,8 @@ class DriverAlignmentOrchestrator:
         # Resolve container driver URLs using the ACTUAL version from AMI
         formatted_driver_version, deb_urls = self.driver_resolver.find_deb_urls(actual_driver_version)
         
-        # Prepare Bitbucket variables (use actual AMI driver version)
-        bitbucket_vars = {
-            'NVIDIA_DRIVER_VERSION': actual_driver_version,
-            'NVIDIA_DRIVER_VER': formatted_driver_version,
-            'EKS_AMI_RELEASE_VERSION': ami_version,
-            'EKS_AMI_TYPE': ami_type,  # Track AMI type for container compatibility
-            'K8S_VERSION': found_k8s_version  # Track the detected/used K8s version
-        }
+        # No Bitbucket variables needed for container-first strategy
+        # This strategy is purely for finding compatible AMI configuration
         
         # Prepare nodegroup config
         nodegroup_config = {
@@ -582,17 +593,16 @@ class DriverAlignmentOrchestrator:
             k8s_version=found_k8s_version,
             ami_release_version=ami_version,
             ami_driver_version=actual_driver_version,  # Use actual AMI version
-            container_driver_version=actual_driver_version,  # Update container to match AMI
+            container_driver_version=actual_driver_version,  # Show what AMI provides
             formatted_driver_version=formatted_driver_version,
             deb_urls=deb_urls,
-            bitbucket_vars_to_update=bitbucket_vars,
             nodegroup_config=nodegroup_config
         )
     
     def execute_alignment(self, alignment: DriverAlignment, cluster_name: str, nodegroup_name: str,
                          template_path: str = None, template_overrides: Dict = None,
-                         dry_run: bool = False) -> Dict:
-        """Execute the alignment plan using template-based nodegroup creation."""
+                         output_file: str = None) -> Dict:
+        """Execute the alignment plan - both strategies generate nodegroup configurations."""
         
         print(f"\n🚀 Executing {alignment.strategy} alignment strategy...")
         
@@ -601,27 +611,6 @@ class DriverAlignmentOrchestrator:
             "bitbucket_updates": {},
             "nodegroup_creation": {}
         }
-        
-        # Update Bitbucket variables
-        if self.bitbucket_api and alignment.bitbucket_vars_to_update:
-            print("📝 Updating Bitbucket repository variables...")
-            
-            for key, value in alignment.bitbucket_vars_to_update.items():
-                if dry_run:
-                    print(f"  Would update {key} = {value}")
-                    results["bitbucket_updates"][key] = {"dry_run": True, "value": value}
-                else:
-                    try:
-                        success = self.bitbucket_api.update_repository_variable(key, value)
-                        if success:
-                            print(f"  ✅ Updated {key} = {value}")
-                            results["bitbucket_updates"][key] = {"success": True, "value": value}
-                        else:
-                            print(f"  ❌ Failed to update {key}")
-                            results["bitbucket_updates"][key] = {"success": False, "value": value}
-                    except Exception as e:
-                        print(f"  ❌ Error updating {key}: {e}")
-                        results["bitbucket_updates"][key] = {"error": str(e), "value": value}
         
         # Prepare nodegroup template overrides
         nodegroup_overrides = {
@@ -636,28 +625,136 @@ class DriverAlignmentOrchestrator:
         if template_overrides:
             nodegroup_overrides.update(template_overrides)
         
-        # Create nodegroup using template
-        print("🏗️  Creating EKS nodegroup...")
-        
-        try:
-            nodegroup_result = self.nodegroup_manager.create_nodegroup_from_template(
+        if alignment.strategy == "container-first":
+            # Container-first: Generate and output configuration files only
+            print("📄 Generating nodegroup configuration files...")
+            
+            # Generate final nodegroup configuration
+            final_config = self._generate_final_nodegroup_config(
                 template_path=template_path,
-                overrides=nodegroup_overrides,
-                dry_run=dry_run
+                overrides=nodegroup_overrides
             )
             
-            if dry_run:
-                print("  This was a dry run - no actual nodegroup was created")
-            else:
-                print("  ✅ Nodegroup creation initiated")
+            # Output to console
+            print("\n" + "="*80)
+            print("📋 GENERATED NODEGROUP CONFIGURATION:")
+            print("="*80)
+            print(json.dumps(final_config, indent=2))
+            print("="*80)
             
-            results["nodegroup_creation"] = nodegroup_result
+            # Output to file
+            output_filename = output_file or f"nodegroup-{nodegroup_name}-config.json"
+            try:
+                with open(output_filename, 'w') as f:
+                    json.dump(final_config, f, indent=2)
+                print(f"✅ Configuration saved to: {output_filename}")
+                results["config_file"] = output_filename
+                results["nodegroup_config"] = final_config
+            except Exception as e:
+                print(f"❌ Error saving configuration file: {e}")
+                results["error"] = str(e)
             
-        except Exception as e:
-            print(f"  ❌ Error creating nodegroup: {e}")
-            results["nodegroup_creation"] = {"error": str(e)}
-        
+            print(f"\n💡 Next steps:")
+            print(f"   1. Review the generated configuration in {output_filename}")
+            print(f"   2. Create the nodegroup using: aws eks create-nodegroup --cli-input-json file://{output_filename}")
+            print(f"   3. Or use the configuration with your infrastructure-as-code tools")
+            print(f"\n📦 AMI Information:")
+            print(f"   • AMI Release: {alignment.k8s_version}-{alignment.ami_release_version}")
+            print(f"   • AMI Type: {alignment.nodegroup_config['ami_type']}")
+            print(f"   • Driver Version: {alignment.ami_driver_version}")
+            print(f"   • Compatible with container driver: {alignment.formatted_driver_version}")
+            
+        else:
+            # AMI-first: Generate nodegroup config and show container driver information
+            print("📄 Generating nodegroup configuration and container driver information...")
+            
+            # Generate final nodegroup configuration
+            final_config = self._generate_final_nodegroup_config(
+                template_path=template_path,
+                overrides=nodegroup_overrides
+            )
+            
+            # Output to console
+            print("\n" + "="*80)
+            print("📋 GENERATED NODEGROUP CONFIGURATION:")
+            print("="*80)
+            print(json.dumps(final_config, indent=2))
+            print("="*80)
+            
+            # Output to file
+            output_filename = output_file or f"nodegroup-{nodegroup_name}-config.json"
+            try:
+                with open(output_filename, 'w') as f:
+                    json.dump(final_config, f, indent=2)
+                print(f"✅ Configuration saved to: {output_filename}")
+                results["config_file"] = output_filename
+                results["nodegroup_config"] = final_config
+            except Exception as e:
+                print(f"❌ Error saving configuration file: {e}")
+                results["error"] = str(e)
+            
+            print(f"\n🔧 Container Driver Information:")
+            print(f"   • Update your containers to use driver version: {alignment.formatted_driver_version}")
+            print(f"   • NVIDIA driver packages to install in containers:")
+            for url in alignment.deb_urls:
+                if not url.startswith("# NOT FOUND"):
+                    package_name = url.split('/')[-1].split('_')[0]
+                    print(f"     - {package_name}: {url}")
+            
+            print(f"\n💡 Next steps:")
+            print(f"   1. Update your container images with driver version: {alignment.formatted_driver_version}")
+            print(f"   2. Review the generated nodegroup configuration in {output_filename}")
+            print(f"   3. Create the nodegroup using: aws eks create-nodegroup --cli-input-json file://{output_filename}")
+            print(f"\n📦 AMI Information:")
+            print(f"   • AMI Release: {alignment.k8s_version}-{alignment.ami_release_version}")
+            print(f"   • AMI Type: {alignment.nodegroup_config['ami_type']}")
+            print(f"   • Driver Version: {alignment.ami_driver_version}")
+            
         return results
+    
+    def _generate_final_nodegroup_config(self, template_path: str = None, overrides: Dict = None) -> Dict:
+        """Generate the final nodegroup configuration by merging template and overrides."""
+        
+        # Load template
+        if template_path:
+            try:
+                with open(template_path, 'r') as f:
+                    config = json.load(f)
+            except FileNotFoundError:
+                raise Exception(f"Template file not found: {template_path}")
+            except json.JSONDecodeError as e:
+                raise Exception(f"Invalid JSON in template file: {e}")
+        else:
+            # Use default template
+            config = self.nodegroup_manager._get_default_nodegroup_template()
+        
+        # Apply overrides
+        if overrides:
+            config.update(overrides)
+        
+        # Convert to AWS CLI format (using the keys expected by create-nodegroup)
+        aws_config = {
+            "clusterName": config["clusterName"],
+            "nodegroupName": config["nodegroupName"],
+            "scalingConfig": config.get("scalingConfig", {}),
+            "instanceTypes": config.get("instanceTypes", []),
+            "amiType": config.get("amiType"),
+            "nodeRole": config["nodeRole"],
+            "subnets": config["subnets"],
+            "version": config.get("version"),
+            "releaseVersion": config.get("releaseVersion"),
+            "capacityType": config.get("capacityType"),
+            "diskSize": config.get("diskSize"),
+            "updateConfig": config.get("updateConfig", {}),
+            "labels": config.get("labels", {}),
+            "taints": config.get("taints", []),
+            "remoteAccess": config.get("remoteAccess", {})
+        }
+        
+        # Remove empty/None values
+        aws_config = {k: v for k, v in aws_config.items() if v is not None and v != {} and v != []}
+        
+        return aws_config
     
     def print_alignment_summary(self, alignment: DriverAlignment):
         """Print a summary of the alignment plan."""
@@ -671,13 +768,22 @@ class DriverAlignmentOrchestrator:
         print(f"Container Driver Version: {alignment.container_driver_version}")
         print(f"Formatted Driver Version: {alignment.formatted_driver_version}")
         
-        print(f"\nBitbucket Variables to Update:")
-        for key, value in alignment.bitbucket_vars_to_update.items():
-            print(f"  {key} = {value}")
-        
-        print(f"\nNVIDIA .deb URLs:")
-        for url in alignment.deb_urls:
-            print(f"  {url}")
+        if alignment.strategy == "ami-first":
+            print(f"\n🔧 Container Updates Required:")
+            print(f"   • Update container images to use driver: {alignment.formatted_driver_version}")
+            print(f"   • Use these NVIDIA .deb packages in your Dockerfile:")
+            for url in alignment.deb_urls:
+                if not url.startswith("# NOT FOUND"):
+                    package_name = url.split('/')[-1].split('_')[0]
+                    print(f"     - {package_name}")
+            
+            print(f"\n📦 Nodegroup Configuration:")
+            print(f"   • Will be generated using latest AMI with driver {alignment.ami_driver_version}")
+            print(f"   • AMI Type: {alignment.nodegroup_config['ami_type']}")
+        else:
+            print(f"\nPurpose: Generate nodegroup configuration for existing container images")
+            print(f"AMI Type: {alignment.nodegroup_config['ami_type']}")
+            print(f"Container compatibility: Your containers should work with this AMI")
         
         print("="*80)
 
@@ -685,51 +791,62 @@ class DriverAlignmentOrchestrator:
 def main():
     parser = argparse.ArgumentParser(description="EKS NVIDIA Driver Alignment Tool")
     
-    # Strategy selection
+    # Required arguments - only these 3 are truly required
     parser.add_argument("--strategy", choices=["ami-first", "container-first"], required=True,
                        help="Alignment strategy to use")
-    
-    # Cluster configuration
     parser.add_argument("--cluster-name", required=True, help="EKS cluster name")
-    parser.add_argument("--nodegroup-name", required=True, help="EKS nodegroup name")
-    parser.add_argument("--instance-types", nargs="+", default=["g4dn.xlarge"], 
-                       help="EC2 instance types for nodegroup")
-    parser.add_argument("--subnet-ids", nargs="+", required=True, help="Subnet IDs for nodegroup")
-    parser.add_argument("--node-role-arn", required=True, help="IAM role ARN for nodegroup")
     
-    # Version parameters
-    parser.add_argument("--k8s-version", help="Kubernetes version (for ami-first strategy)")
-    parser.add_argument("--current-driver-version", help="Current container driver version (for container-first strategy)")
+    # Conditionally required argument for container-first strategy
+    parser.add_argument("--current-driver-version", 
+                       help="Current container driver version (required for container-first strategy)")
+    
+    # All other arguments are optional overrides for the template
+    parser.add_argument("--nodegroup-name", help="EKS nodegroup name (overrides template)")
+    parser.add_argument("--template", help="Path to nodegroup template JSON file (default: nodegroup_template.json)")
+    parser.add_argument("--k8s-version", help="Kubernetes version (overrides auto-detection)")
+    
+    # Template overrides - these will be passed to the template
+    parser.add_argument("--instance-types", nargs="+", 
+                       help="EC2 instance types for nodegroup (overrides template)")
+    parser.add_argument("--subnet-ids", nargs="+", 
+                       help="Subnet IDs for nodegroup (overrides template)")
+    parser.add_argument("--node-role-arn", 
+                       help="IAM role ARN for nodegroup (overrides template)")
+    parser.add_argument("--capacity-type", choices=["ON_DEMAND", "SPOT"],
+                       help="Capacity type (overrides template)")
+    parser.add_argument("--disk-size", type=int,
+                       help="Disk size in GB (overrides template)")
+    parser.add_argument("--min-size", type=int,
+                       help="Minimum number of nodes (overrides template)")
+    parser.add_argument("--max-size", type=int,
+                       help="Maximum number of nodes (overrides template)")
+    parser.add_argument("--desired-size", type=int,
+                       help="Desired number of nodes (overrides template)")
     
     # AWS configuration
     parser.add_argument("--aws-profile", default="default", help="AWS profile")
     parser.add_argument("--aws-region", default="eu-west-1", help="AWS region")
-    parser.add_argument("--ubuntu-version", default="ubuntu2204", help="Ubuntu version for driver resolution")
-    
-    # Bitbucket configuration
-    parser.add_argument("--bitbucket-workspace", help="Bitbucket workspace")
-    parser.add_argument("--bitbucket-repo", help="Bitbucket repository slug")
-    parser.add_argument("--bitbucket-username", help="Bitbucket username")
-    parser.add_argument("--bitbucket-app-password", help="Bitbucket app password")
+    parser.add_argument("--ubuntu-version", default="ubuntu2204", 
+                       help="Ubuntu version for driver resolution")
     
     # Execution options
-    parser.add_argument("--dry-run", action="store_true", help="Show what would be done without executing")
-    parser.add_argument("--plan-only", action="store_true", help="Only show the alignment plan")
-    parser.add_argument("--debug", action="store_true", help="Enable detailed debug logging for driver resolution")
+    parser.add_argument("--plan-only", action="store_true", 
+                       help="Only show the alignment plan")
+    parser.add_argument("--output-file", "-o", 
+                       help="Output file for nodegroup configuration")
+    parser.add_argument("--debug", action="store_true", 
+                       help="Enable detailed debug logging for driver resolution")
     
     args = parser.parse_args()
     
     # Validate strategy-specific arguments
-    if args.strategy == "ami-first" and not args.k8s_version and not args.cluster_name:
-        parser.error("--k8s-version or --cluster-name is required for ami-first strategy (for auto-detection)")
-    
     if args.strategy == "container-first" and not args.current_driver_version:
         parser.error("--current-driver-version is required for container-first strategy")
     
     # Show informational message about K8s version detection
-    if not args.k8s_version and args.cluster_name:
+    if not args.k8s_version:
         print(f"ℹ️  Will auto-detect Kubernetes version from cluster: {args.cluster_name}")
-    elif args.k8s_version and args.cluster_name:
+    else:
         print(f"ℹ️  Using specified K8s version {args.k8s_version} (override for cluster {args.cluster_name})")
         print(f"   This is useful for preparing nodegroups for cluster upgrades")
     
@@ -741,14 +858,76 @@ def main():
         'debug': args.debug,
     }
     
-    # Add Bitbucket configuration if provided
-    if args.bitbucket_workspace:
-        config.update({
-            'bitbucket_workspace': args.bitbucket_workspace,
-            'bitbucket_repo': args.bitbucket_repo,
-            'bitbucket_username': args.bitbucket_username,
-            'bitbucket_app_password': args.bitbucket_app_password,
-        })
+    # Build template overrides from command line arguments
+    template_overrides = {}
+    
+    # Add nodegroup-specific overrides
+    if args.nodegroup_name:
+        template_overrides["nodegroupName"] = args.nodegroup_name
+    if args.instance_types:
+        template_overrides["instanceTypes"] = args.instance_types
+    if args.subnet_ids:
+        template_overrides["subnets"] = args.subnet_ids
+    if args.node_role_arn:
+        template_overrides["nodeRole"] = args.node_role_arn
+    if args.capacity_type:
+        template_overrides["capacityType"] = args.capacity_type
+    if args.disk_size:
+        template_overrides["diskSize"] = args.disk_size
+    
+    # Add scaling configuration if any scaling parameters provided
+    scaling_config = {}
+    if args.min_size is not None:
+        scaling_config["minSize"] = args.min_size
+    if args.max_size is not None:
+        scaling_config["maxSize"] = args.max_size
+    if args.desired_size is not None:
+        scaling_config["desiredSize"] = args.desired_size
+    
+    if scaling_config:
+        template_overrides["scalingConfig"] = scaling_config
+    
+    # Validate that we have all required parameters from template or command line
+    required_params = {
+        'clusterName': args.cluster_name,  # Always provided (required argument)
+        'nodegroupName': args.nodegroup_name,
+        'nodeRole': args.node_role_arn, 
+        'subnets': args.subnet_ids
+    }
+    
+    # Check if we need to validate required parameters
+    template_will_provide = False
+    if args.template and os.path.exists(args.template):
+        template_will_provide = True
+    elif os.path.exists("nodegroup_template.json"):
+        template_will_provide = True
+    
+    if not template_will_provide:
+        # No template file available - check required command line arguments
+        missing_required = []
+        for param_name, param_value in required_params.items():
+            if param_name != 'clusterName' and not param_value:  # clusterName is always required via args
+                cli_arg = {
+                    'nodegroupName': '--nodegroup-name',
+                    'nodeRole': '--node-role-arn',
+                    'subnets': '--subnet-ids'
+                }.get(param_name, f'--{param_name.lower()}')
+                missing_required.append(cli_arg)
+        
+        if missing_required:
+            print(f"❌ Error: No template file found and missing required arguments:")
+            for field in missing_required:
+                print(f"   {field}")
+            print(f"\n💡 Either:")
+            print(f"   1. Create a nodegroup_template.json file with required configuration")
+            print(f"   2. Provide a template file with --template")
+            print(f"   3. Specify all required arguments above")
+            print(f"\n📋 Required AWS CLI parameters for create-nodegroup:")
+            print(f"   • --cluster-name (provided)")
+            print(f"   • --nodegroup-name")
+            print(f"   • --node-role") 
+            print(f"   • --subnets")
+            sys.exit(1)
     
     # Initialize orchestrator
     orchestrator = DriverAlignmentOrchestrator(config)
@@ -767,18 +946,17 @@ def main():
                 cluster_name=args.cluster_name
             )
         
+        # Handle case where container-first returns None (fuzzy search with multiple matches)
+        if alignment is None:
+            sys.exit(1)
+        
         # Show alignment plan
         orchestrator.print_alignment_summary(alignment)
         
         # Execute if not plan-only
         if not args.plan_only:
-            # Get nodegroup name from template or override
-            try:
-                with open(args.template, 'r') as f:
-                    template_config = json.load(f)
-                nodegroup_name = template_overrides.get("nodegroupName", template_config.get("nodegroupName", "gpu-workers"))
-            except Exception:
-                nodegroup_name = template_overrides.get("nodegroupName", "gpu-workers")
+            # Use nodegroup name from args, or fallback to default
+            nodegroup_name = args.nodegroup_name or "gpu-workers"
             
             results = orchestrator.execute_alignment(
                 alignment=alignment,
@@ -786,12 +964,11 @@ def main():
                 nodegroup_name=nodegroup_name,
                 template_path=args.template,
                 template_overrides=template_overrides,
-                dry_run=args.dry_run
+                output_file=args.output_file
             )
             
-            print(f"\n✅ Alignment execution completed!")
-            if args.dry_run:
-                print("This was a dry run - no actual changes were made.")
+            print(f"\n✅ Configuration generation completed!")
+            print(f"Use the generated configuration to create your nodegroup when ready.")
         
     except Exception as e:
         print(f"❌ Error: {e}")
