@@ -32,63 +32,6 @@ class DriverAlignment:
 
 
 class EKSNodegroupManager:
-class DriverAlignment:
-    strategy: str
-    k8s_version: str
-    ami_release_version: str
-    ami_driver_version: str
-    container_driver_version: str
-    formatted_driver_version: str
-    deb_urls: List[str]
-    bitbucket_vars_to_update: Dict[str, str]
-    nodegroup_config: Dict
-
-
-class BitbucketAPI:
-    def __init__(self, workspace: str, repo_slug: str, username: str, app_password: str):
-        self.workspace = workspace
-        self.repo_slug = repo_slug
-        self.auth = (username, app_password)
-        self.base_url = f"https://api.bitbucket.org/2.0/repositories/{workspace}/{repo_slug}"
-    
-    def get_repository_variables(self) -> Dict[str, str]:
-        """Get all repository variables."""
-        url = f"{self.base_url}/pipelines_config/variables/"
-        response = requests.get(url, auth=self.auth)
-        if response.status_code != 200:
-            raise Exception(f"Failed to get repository variables: {response.text}")
-        
-        variables = {}
-        data = response.json()
-        for var in data.get('values', []):
-            variables[var['key']] = var['value']
-        
-        return variables
-    
-    def update_repository_variable(self, key: str, value: str, secured: bool = False) -> bool:
-        """Update or create a repository variable."""
-        url = f"{self.base_url}/pipelines_config/variables/{key}"
-        
-        payload = {
-            "key": key,
-            "value": value,
-            "secured": secured
-        }
-        
-        # Try to update first
-        response = requests.put(url, json=payload, auth=self.auth)
-        if response.status_code == 200:
-            return True
-        elif response.status_code == 404:
-            # Variable doesn't exist, create it
-            url = f"{self.base_url}/pipelines_config/variables/"
-            response = requests.post(url, json=payload, auth=self.auth)
-            return response.status_code == 201
-        else:
-            raise Exception(f"Failed to update variable {key}: {response.text}")
-
-
-class EKSNodegroupManager:
     def __init__(self, profile: str = "default", region: str = "eu-west-1"):
         self.profile = profile
         self.region = region
@@ -614,7 +557,7 @@ class DriverAlignmentOrchestrator:
         
         # Prepare nodegroup template overrides
         nodegroup_overrides = {
-            "clusterName": cluster_name,
+            "clusterName": cluster_name or "YOUR-CLUSTER-NAME",
             "nodegroupName": nodegroup_name,
             "version": alignment.k8s_version,
             "releaseVersion": f"{alignment.k8s_version}-{alignment.ami_release_version}",
@@ -791,10 +734,10 @@ class DriverAlignmentOrchestrator:
 def main():
     parser = argparse.ArgumentParser(description="EKS NVIDIA Driver Alignment Tool")
     
-    # Required arguments - only these 3 are truly required
-    parser.add_argument("--strategy", choices=["ami-first", "container-first"], required=True,
+    # Required arguments - only these are truly required (except during template generation)
+    parser.add_argument("--strategy", choices=["ami-first", "container-first"],
                        help="Alignment strategy to use")
-    parser.add_argument("--cluster-name", required=True, help="EKS cluster name")
+    parser.add_argument("--cluster-name", help="EKS cluster name")
     
     # Conditionally required argument for container-first strategy
     parser.add_argument("--current-driver-version", 
@@ -851,36 +794,81 @@ def main():
             print(f"   Remove the existing file first if you want to regenerate it")
             sys.exit(1)
         
-        # Generate sample template
+        # Generate comprehensive template with all AWS CLI parameters
+        # Use command line values if provided, otherwise use placeholders/defaults
         sample_template = {
-            "clusterName": "",
-            "nodegroupName": "gpu-workers",
-            "nodeRole": "arn:aws:iam::YOUR_ACCOUNT_ID:role/EKSNodeInstanceRole",
-            "subnets": [
+            # Required parameters
+            "clusterName": args.cluster_name if hasattr(args, 'cluster_name') and args.cluster_name else "",
+            "nodegroupName": args.nodegroup_name or "gpu-workers",
+            "nodeRole": args.node_role_arn or "arn:aws:iam::YOUR_ACCOUNT_ID:role/EKSNodeInstanceRole",
+            "subnets": args.subnet_ids or [
                 "subnet-YOUR_SUBNET_1",
                 "subnet-YOUR_SUBNET_2"
             ],
-            "instanceTypes": [
-                "g4dn.xlarge"
-            ],
+            
+            # Instance configuration
+            "instanceTypes": args.instance_types or ["g4dn.xlarge"],
             "amiType": "AL2023_x86_64_NVIDIA",
-            "capacityType": "ON_DEMAND",
-            "diskSize": 50,
+            "capacityType": args.capacity_type or "ON_DEMAND",
+            "diskSize": args.disk_size or 50,
+            
+            # Scaling configuration
             "scalingConfig": {
-                "minSize": 0,
-                "maxSize": 10,
-                "desiredSize": 1
+                "minSize": args.min_size if args.min_size is not None else 0,
+                "maxSize": args.max_size if args.max_size is not None else 10,
+                "desiredSize": args.desired_size if args.desired_size is not None else 1
             },
+            
+            # Update configuration
             "updateConfig": {
                 "maxUnavailable": 1
+                # Alternative: "maxUnavailablePercentage": 25
+                # "updateStrategy": "RollingUpdate"  # or "ForceUpdate"
             },
+            
+            # Network and access configuration
+            "remoteAccess": {
+                # "ec2SshKey": "your-ssh-key-name",
+                # "sourceSecurityGroups": ["sg-xxxxxxxxx"]
+            },
+            
+            # Launch template (optional - if using custom AMI or advanced config)
+            # "launchTemplate": {
+            #     "id": "lt-xxxxxxxxx",
+            #     "name": "your-launch-template-name", 
+            #     "version": "1"
+            # },
+            
+            # Kubernetes configuration
+            # "version": "1.31",  # Will be auto-detected from cluster
+            # "releaseVersion": "1.31-20250403",  # Will be set by alignment strategy
+            
+            # Node repair configuration (optional)
+            # "nodeRepairConfig": {
+            #     "enabled": true
+            # },
+            
+            # Labels for node scheduling
             "labels": {
                 "node-type": "gpu-worker",
-                "nvidia.com/gpu": "true"
+                "nvidia.com/gpu": "true",
+                "environment": "production"
             },
+            
+            # Taints for node scheduling (optional)
+            "taints": [
+                # {
+                #     "key": "nvidia.com/gpu",
+                #     "value": "true", 
+                #     "effect": "NoSchedule"  # or "PreferNoSchedule", "NoExecute"
+                # }
+            ],
+            
+            # Resource tags
             "tags": {
                 "Environment": "production",
-                "Project": "ml-workloads"
+                "Project": "ml-workloads",
+                "ManagedBy": "eks-nvidia-alignment-tool"
             }
         }
         
@@ -888,14 +876,36 @@ def main():
             with open(template_filename, 'w') as f:
                 json.dump(sample_template, f, indent=2)
             
-            print(f"✅ Generated sample template: {template_filename}")
-            print(f"\n📝 Please edit the following required fields:")
-            print(f"   • nodeRole: Replace YOUR_ACCOUNT_ID with your AWS account ID")
-            print(f"   • subnets: Replace with your actual subnet IDs")
-            print(f"\n💡 Optional customizations:")
-            print(f"   • instanceTypes: Choose GPU instance types for your workload")
-            print(f"   • scalingConfig: Adjust min/max/desired node counts")
-            print(f"   • labels/tags: Add your custom labels and tags")
+            print(f"✅ Generated comprehensive template: {template_filename}")
+            print(f"\n📝 Required fields (must be edited):")
+            if not args.cluster_name:
+                print(f"   • clusterName: Specify your EKS cluster name")
+            if not args.node_role_arn:
+                print(f"   • nodeRole: Replace YOUR_ACCOUNT_ID with your AWS account ID")
+            if not args.subnet_ids:
+                print(f"   • subnets: Replace with your actual subnet IDs")
+            
+            print(f"\n💡 Template includes all AWS CLI options:")
+            print(f"   • Instance configuration: instanceTypes, amiType, capacityType, diskSize")
+            print(f"   • Scaling: minSize, maxSize, desiredSize")
+            print(f"   • Updates: maxUnavailable, updateStrategy")
+            print(f"   • Access: remoteAccess (SSH configuration)")
+            print(f"   • Scheduling: labels, taints")
+            print(f"   • Advanced: launchTemplate, nodeRepairConfig")
+            print(f"   • Tags: resource tagging")
+            
+            print(f"\n🔧 Command line values used:")
+            if args.nodegroup_name:
+                print(f"   • nodegroupName: {args.nodegroup_name}")
+            if args.instance_types:
+                print(f"   • instanceTypes: {args.instance_types}")
+            if args.capacity_type:
+                print(f"   • capacityType: {args.capacity_type}")
+            if args.disk_size:
+                print(f"   • diskSize: {args.disk_size}")
+            if any([args.min_size is not None, args.max_size is not None, args.desired_size is not None]):
+                print(f"   • scalingConfig: min={args.min_size}, max={args.max_size}, desired={args.desired_size}")
+            
             print(f"\n🚀 After editing, you can run:")
             print(f"   python {os.path.basename(__file__)} --strategy ami-first --cluster-name your-cluster")
             
@@ -905,14 +915,24 @@ def main():
         
         sys.exit(0)
     
+    # Validate required arguments for normal operation
+    if not args.strategy:
+        parser.error("--strategy is required")
+    
+    # Either cluster-name OR k8s-version must be provided
+    if not args.cluster_name and not args.k8s_version:
+        parser.error("Either --cluster-name (for auto-detection) or --k8s-version (manual) is required")
+    
     # Validate strategy-specific arguments
     if args.strategy == "container-first" and not args.current_driver_version:
         parser.error("--current-driver-version is required for container-first strategy")
     
     # Show informational message about K8s version detection
-    if not args.k8s_version:
+    if args.cluster_name and not args.k8s_version:
         print(f"ℹ️  Will auto-detect Kubernetes version from cluster: {args.cluster_name}")
-    else:
+    elif args.k8s_version and not args.cluster_name:
+        print(f"ℹ️  Using specified K8s version: {args.k8s_version} (no cluster connection needed)")
+    elif args.k8s_version and args.cluster_name:
         print(f"ℹ️  Using specified K8s version {args.k8s_version} (override for cluster {args.cluster_name})")
         print(f"   This is useful for preparing nodegroups for cluster upgrades")
     
@@ -955,7 +975,7 @@ def main():
     
     # Validate that we have all required parameters from template or command line
     required_params = {
-        'clusterName': args.cluster_name,  # Always provided (required argument)
+        'clusterName': args.cluster_name or "PLACEHOLDER",  # Will be set later if using k8s-version only
         'nodegroupName': args.nodegroup_name,
         'nodeRole': args.node_role_arn, 
         'subnets': args.subnet_ids
@@ -972,7 +992,10 @@ def main():
         # No template file available - check required command line arguments
         missing_required = []
         for param_name, param_value in required_params.items():
-            if param_name != 'clusterName' and not param_value:  # clusterName is always required via args
+            if param_name == 'clusterName':
+                # clusterName can be provided via args.cluster_name or be a placeholder for k8s-version mode
+                continue
+            elif not param_value:
                 cli_arg = {
                     'nodegroupName': '--nodegroup-name',
                     'nodeRole': '--node-role-arn',
@@ -985,14 +1008,10 @@ def main():
             for field in missing_required:
                 print(f"   {field}")
             print(f"\n💡 Either:")
-            print(f"   1. Create a nodegroup_template.json file with required configuration")
-            print(f"   2. Provide a template file with --template")
-            print(f"   3. Specify all required arguments above")
-            print(f"\n📋 Required AWS CLI parameters for create-nodegroup:")
-            print(f"   • --cluster-name (provided)")
-            print(f"   • --nodegroup-name")
-            print(f"   • --node-role") 
-            print(f"   • --subnets")
+            print(f"   1. Generate a template: python {os.path.basename(__file__)} --generate-template")
+            print(f"   2. Create a nodegroup_template.json file with required configuration")
+            print(f"   3. Provide a template file with --template")
+            print(f"   4. Specify all required arguments above")
             sys.exit(1)
     
     # Initialize orchestrator
@@ -1026,7 +1045,7 @@ def main():
             
             results = orchestrator.execute_alignment(
                 alignment=alignment,
-                cluster_name=args.cluster_name,
+                cluster_name=args.cluster_name or "YOUR-CLUSTER-NAME",
                 nodegroup_name=nodegroup_name,
                 template_path=args.template,
                 template_overrides=template_overrides,
