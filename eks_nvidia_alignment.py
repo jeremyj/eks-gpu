@@ -834,10 +834,76 @@ def main():
                        help="Only show the alignment plan")
     parser.add_argument("--output-file", "-o", 
                        help="Output file for nodegroup configuration")
+    parser.add_argument("--generate-template", action="store_true",
+                       help="Generate a sample nodegroup_template.json file and exit")
     parser.add_argument("--debug", action="store_true", 
                        help="Enable detailed debug logging for driver resolution")
     
     args = parser.parse_args()
+    
+    # Handle template generation first
+    if args.generate_template:
+        template_filename = "nodegroup_template.json"
+        
+        # Check if file already exists
+        if os.path.exists(template_filename):
+            print(f"❌ Error: {template_filename} already exists")
+            print(f"   Remove the existing file first if you want to regenerate it")
+            sys.exit(1)
+        
+        # Generate sample template
+        sample_template = {
+            "clusterName": "",
+            "nodegroupName": "gpu-workers",
+            "nodeRole": "arn:aws:iam::YOUR_ACCOUNT_ID:role/EKSNodeInstanceRole",
+            "subnets": [
+                "subnet-YOUR_SUBNET_1",
+                "subnet-YOUR_SUBNET_2"
+            ],
+            "instanceTypes": [
+                "g4dn.xlarge"
+            ],
+            "amiType": "AL2023_x86_64_NVIDIA",
+            "capacityType": "ON_DEMAND",
+            "diskSize": 50,
+            "scalingConfig": {
+                "minSize": 0,
+                "maxSize": 10,
+                "desiredSize": 1
+            },
+            "updateConfig": {
+                "maxUnavailable": 1
+            },
+            "labels": {
+                "node-type": "gpu-worker",
+                "nvidia.com/gpu": "true"
+            },
+            "tags": {
+                "Environment": "production",
+                "Project": "ml-workloads"
+            }
+        }
+        
+        try:
+            with open(template_filename, 'w') as f:
+                json.dump(sample_template, f, indent=2)
+            
+            print(f"✅ Generated sample template: {template_filename}")
+            print(f"\n📝 Please edit the following required fields:")
+            print(f"   • nodeRole: Replace YOUR_ACCOUNT_ID with your AWS account ID")
+            print(f"   • subnets: Replace with your actual subnet IDs")
+            print(f"\n💡 Optional customizations:")
+            print(f"   • instanceTypes: Choose GPU instance types for your workload")
+            print(f"   • scalingConfig: Adjust min/max/desired node counts")
+            print(f"   • labels/tags: Add your custom labels and tags")
+            print(f"\n🚀 After editing, you can run:")
+            print(f"   python {os.path.basename(__file__)} --strategy ami-first --cluster-name your-cluster")
+            
+        except Exception as e:
+            print(f"❌ Error creating template file: {e}")
+            sys.exit(1)
+        
+        sys.exit(0)
     
     # Validate strategy-specific arguments
     if args.strategy == "container-first" and not args.current_driver_version:
