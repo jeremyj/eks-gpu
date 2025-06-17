@@ -3,7 +3,7 @@
 Enhanced EKS AMI Release Parser
 
 Fixed version that properly handles both AL2 and AL2023 AMI types
-and improves driver version matching for container-first strategy.
+for both x86_64 and ARM64 architectures with improved driver version matching.
 """
 
 import requests
@@ -102,15 +102,15 @@ class EKSAMIParser:
         # Initialize packages dict
         packages = {}
         
-        # Look for tables with NVIDIA GPU AMI columns
+        # Look for tables with NVIDIA GPU AMI columns (including ARM64)
         for i, table in enumerate(tables):
             headers = [th.get_text().strip() for th in table.find_all('th')]
             self.log(f"Table {i} headers: {headers}")
             
-            # Check for both AL2023 and AL2 GPU AMI types
+            # Check for both AL2023 and AL2 GPU AMI types across architectures
             gpu_columns = {}
             for idx, header in enumerate(headers):
-                if header in ['AL2023_x86_64_NVIDIA', 'AL2_x86_64_GPU']:
+                if header in ['AL2023_x86_64_NVIDIA', 'AL2_x86_64_GPU', 'AL2023_ARM_64_NVIDIA']:
                     gpu_columns[header] = idx
                     self.log(f"Found GPU column: {header} at index {idx}")
             
@@ -130,10 +130,10 @@ class EKSAMIParser:
             if current.name == 'table':
                 headers = [th.get_text().strip() for th in current.find_all('th')]
                 
-                # Check for GPU columns
+                # Check for GPU columns (including ARM64)
                 gpu_columns = {}
                 for idx, h in enumerate(headers):
-                    if h in ['AL2023_x86_64_NVIDIA', 'AL2_x86_64_GPU']:
+                    if h in ['AL2023_x86_64_NVIDIA', 'AL2_x86_64_GPU', 'AL2023_ARM_64_NVIDIA']:
                         gpu_columns[h] = idx
                 
                 if gpu_columns:
@@ -194,7 +194,7 @@ class EKSAMIParser:
                     current_logical_col += colspan
                 
                 if cell_value and cell_value not in ['—', '-', '']:
-                    # Store with AMI type prefix to distinguish between AL2 and AL2023
+                    # Store with AMI type prefix to distinguish between AL2, AL2023, and architectures
                     key = f"{package_name}_{column_name}"
                     packages[key] = cell_value
                     self.log(f"  ✅ STORED: {key} = {cell_value}")
@@ -208,6 +208,16 @@ class EKSAMIParser:
         
         self.log(f"Extracted {len(packages)} packages for K8s {k8s_version}")
         return packages
+
+    def get_ami_types_for_architecture(self, architecture: str) -> List[str]:
+        """Get AMI types for a specific architecture."""
+        if architecture.lower() == "arm64":
+            return ["AL2023_ARM_64_NVIDIA"]
+        elif architecture.lower() == "x86_64" or architecture.lower() == "amd64":
+            return ["AL2023_x86_64_NVIDIA", "AL2_x86_64_GPU"]
+        else:
+            # Default to both x86_64 types for backward compatibility
+            return ["AL2023_x86_64_NVIDIA", "AL2_x86_64_GPU"]
 
     def find_kmod_nvidia_version(self, k8s_version: str, ami_type: str = "AL2023_x86_64_NVIDIA") -> Optional[Tuple[str, str, str]]:
         """Find the first kmod-nvidia-latest-dkms version for the specified Kubernetes version and AMI type."""
@@ -283,7 +293,8 @@ class EKSAMIParser:
 
     def find_releases_by_driver_version(self, driver_version: str, fuzzy: bool = False, 
                                        k8s_version: Optional[str] = None, 
-                                       ami_types: List[str] = None) -> List[Tuple[str, str, str, str, str]]:
+                                       ami_types: List[str] = None,
+                                       architecture: str = "x86_64") -> List[Tuple[str, str, str, str, str]]:
         """
         Find releases that contain the specified driver version.
         
@@ -291,13 +302,14 @@ class EKSAMIParser:
             driver_version: The driver version to search for (e.g., "550.127.08")
             fuzzy: Whether to use fuzzy matching
             k8s_version: Optional Kubernetes version filter
-            ami_types: List of AMI types to search (default: both AL2023 and AL2)
+            ami_types: List of AMI types to search (default: arch-specific types)
+            architecture: Target architecture (x86_64, arm64)
             
         Returns:
             List of tuples: (release_tag, release_date, k8s_version, kmod_version, ami_type)
         """
         if ami_types is None:
-            ami_types = ["AL2023_x86_64_NVIDIA", "AL2_x86_64_GPU"]
+            ami_types = self.get_ami_types_for_architecture(architecture)
             
         releases = self.get_releases()
         matches = []
@@ -401,7 +413,7 @@ class EKSAMIParser:
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Find kmod-nvidia-latest-dkms version for EKS AMI types'
+        description='Find kmod-nvidia-latest-dkms version for EKS AMI types across architectures'
     )
     parser.add_argument(
         '--k8s-version', '-k',
@@ -428,9 +440,15 @@ def main():
     )
     parser.add_argument(
         '--ami-type',
-        choices=['AL2023_x86_64_NVIDIA', 'AL2_x86_64_GPU', 'both'],
+        choices=['AL2023_x86_64_NVIDIA', 'AL2_x86_64_GPU', 'AL2023_ARM_64_NVIDIA', 'both'],
         default='both',
-        help='AMI type to search (default: both)'
+        help='AMI type to search (default: both for x86_64)'
+    )
+    parser.add_argument(
+        '--architecture', '--arch',
+        choices=['x86_64', 'amd64', 'arm64'],
+        default='x86_64',
+        help='Target architecture (default: x86_64)'
     )
     parser.add_argument(
         '--verbose', '-v',
@@ -457,22 +475,29 @@ def main():
             print(f"  - {version}")
         return
     
-    # Determine AMI types to search
+    # Determine AMI types to search based on architecture
     if args.ami_type == 'both':
-        ami_types = ['AL2023_x86_64_NVIDIA', 'AL2_x86_64_GPU']
+        ami_types = eks_parser.get_ami_types_for_architecture(args.architecture)
     else:
         ami_types = [args.ami_type]
+        
+        # Validate AMI type matches architecture
+        arch_ami_types = eks_parser.get_ami_types_for_architecture(args.architecture)
+        if args.ami_type not in arch_ami_types:
+            print(f"⚠️  Warning: AMI type {args.ami_type} may not be compatible with architecture {args.architecture}")
+            print(f"   Compatible AMI types for {args.architecture}: {', '.join(arch_ami_types)}")
     
     # Search by driver version (with optional K8s version filter)
     if args.driver_version:
         filter_text = f" for Kubernetes {args.k8s_version}" if args.k8s_version else ""
-        print(f"Searching for releases with kmod-nvidia-latest-dkms version: {args.driver_version}{filter_text}")
+        arch_text = f" ({args.architecture})" if args.architecture != "x86_64" else ""
+        print(f"Searching for releases with kmod-nvidia-latest-dkms version: {args.driver_version}{filter_text}{arch_text}")
         if args.fuzzy:
             print("(Using fuzzy matching)")
         print("=" * 80)
         
         matches = eks_parser.find_releases_by_driver_version(
-            args.driver_version, args.fuzzy, args.k8s_version, ami_types
+            args.driver_version, args.fuzzy, args.k8s_version, ami_types, args.architecture
         )
         
         if matches:
@@ -483,11 +508,17 @@ def main():
                 print(f"Date: {release_date}")
                 print(f"Kubernetes version: {k8s_version}")
                 print(f"AMI type: {ami_type}")
+                print(f"Architecture: {'ARM64' if 'ARM' in ami_type else 'x86_64'}")
                 print(f"kmod-nvidia-latest-dkms: {kmod_version}")
                 print("-" * 40)
         else:
             filter_text = f" for Kubernetes {args.k8s_version}" if args.k8s_version else ""
-            print(f"No releases found with driver version: {args.driver_version}{filter_text}")
+            arch_text = f" on {args.architecture}" if args.architecture != "x86_64" else ""
+            print(f"No releases found with driver version: {args.driver_version}{filter_text}{arch_text}")
+            
+            if args.architecture == "arm64":
+                print(f"\n💡 ARM64 AMIs may have different driver availability than x86_64")
+                print(f"   Try searching x86_64 to see if the driver exists: --architecture x86_64")
         return
     
     # Search by Kubernetes version
@@ -498,9 +529,10 @@ def main():
         parser.print_help()
         return
     
-    # Try both AMI types for K8s version search
+    # Try all specified AMI types for K8s version search
     for ami_type in ami_types:
-        print(f"\n--- Searching {ami_type} ---")
+        arch_name = "ARM64" if "ARM" in ami_type else "x86_64"
+        print(f"\n--- Searching {ami_type} ({arch_name}) ---")
         
         if args.latest:
             print(f"Finding latest release for Kubernetes {args.k8s_version}")
@@ -513,6 +545,7 @@ def main():
                 print(f"Latest release: {release_tag}")
                 print(f"Release date: {release_date}")
                 print(f"AMI type: {ami_type}")
+                print(f"Architecture: {arch_name}")
                 print(f"kmod-nvidia-latest-dkms version: {kmod_version}")
             else:
                 print(f"No releases found for Kubernetes {args.k8s_version} with {ami_type}")
@@ -527,6 +560,7 @@ def main():
                 print(f"Found in release: {release_tag}")
                 print(f"Release date: {release_date}")
                 print(f"AMI type: {ami_type}")
+                print(f"Architecture: {arch_name}")
                 print(f"kmod-nvidia-latest-dkms version: {kmod_version}")
             else:
                 print(f"No kmod-nvidia-latest-dkms version found for Kubernetes {args.k8s_version} with {ami_type}")
