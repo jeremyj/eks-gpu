@@ -143,17 +143,6 @@ python eks_ami_parser.py --driver-version 570 --fuzzy
 python eks_ami_parser.py --debug-release v20241121
 ```
 
-### 3. `update_dockerfile_with_nvidia_driver.py` - Legacy Docker Updater
-
-Updates Dockerfile with NVIDIA driver versions from running EKS nodegroups.
-
-```bash
-python update_dockerfile_with_nvidia_driver.py \
-    --cluster my-cluster \
-    --nodegroup my-nodegroup \
-    --dry-run
-```
-
 ## Configuration Templates
 
 ### Template Structure
