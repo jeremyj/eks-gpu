@@ -1,3 +1,191 @@
+#!/usr/bin/env python3
+"""
+EKS NVIDIA Driver Alignment Tool
+
+This tool helps align NVIDIA drivers between EKS nodegroup AMIs and container images.
+It supports two strategies across x86_64 and ARM64 architectures:
+1. AMI-First: Use latest AMI, update container drivers to match
+2. Container-First: Use existing container drivers, find compatible AMI
+"""
+
+import argparse
+import json
+import os
+import requests
+import subprocess
+import sys
+from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from eks_ami_parser import EKSAMIParser
+
+
+@dataclass
+class DriverAlignment:
+    strategy: str
+    k8s_version: str
+    architecture: str
+    ami_release_version: str
+    ami_driver_version: str
+    container_driver_version: str
+    formatted_driver_version: str
+    deb_urls: List[str]
+    nodegroup_config: Dict
+
+
+class EKSNodegroupManager:
+    def __init__(self, profile: str = "default", region: str = "eu-west-1"):
+        self.profile = profile
+        self.region = region
+        # AL2 End-of-Life Information
+        self.AL2_EOL_DATE = "2024-11-26"  # November 26, 2024
+        self.AL2_LAST_K8S_VERSION = "1.32"
+    
+    def get_cluster_k8s_version(self, cluster_name: str) -> str:
+        """Get the current Kubernetes version of the running cluster."""
+        cmd = [
+            "aws", "eks", "describe-cluster",
+            "--name", cluster_name,
+            "--profile", self.profile,
+            "--region", self.region,
+            "--query", "cluster.version",
+            "--output", "text"
+        ]
+        
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            k8s_version = result.stdout.strip()
+            print(f"🔍 Detected cluster Kubernetes version: {k8s_version}")
+            return k8s_version
+        except subprocess.CalledProcessError as e:
+            raise Exception(f"Failed to get cluster version: {e.stderr}")
+    
+    def is_al2_supported(self, k8s_version: str) -> bool:
+        """Check if AL2 AMIs are still supported for the given Kubernetes version."""
+        try:
+            version_parts = [int(x) for x in k8s_version.split('.')]
+            last_supported = [int(x) for x in self.AL2_LAST_K8S_VERSION.split('.')]
+            return version_parts <= last_supported
+        except (ValueError, IndexError):
+            return False
+    
+    def get_recommended_ami_type(self, k8s_version: str, architecture: str = "x86_64") -> str:
+        """Get the recommended AMI type for a given Kubernetes version and architecture."""
+        if architecture.lower() == "arm64":
+            return "AL2023_ARM_64_NVIDIA"
+        else:
+            return "AL2023_x86_64_NVIDIA"  # Always recommend AL2023 for x86_64
+    
+    def validate_ami_compatibility(self, k8s_version: str, ami_type: str) -> bool:
+        """Validate that the AMI type is compatible with the Kubernetes version."""
+        if ami_type == "AL2_x86_64_GPU" and not self.is_al2_supported(k8s_version):
+            return False
+        return True
+    
+    def get_latest_ami_for_k8s_version(self, k8s_version: str, architecture: str = "x86_64") -> Tuple[str, str]:
+        """Get the latest AMI release version and driver version for a K8s version and architecture."""
+        eks_parser = EKSAMIParser(verbose=False)  # Control verbosity through main debug flag
+        
+        # Get recommended AMI type for architecture
+        ami_type = self.get_recommended_ami_type(k8s_version, architecture)
+        result = eks_parser.find_latest_release_for_k8s(k8s_version, ami_type)
+        
+        if not result:
+            raise Exception(f"No {architecture} AMI found for Kubernetes version {k8s_version}")
+        
+        release_tag, release_date, kmod_version = result
+        # Extract version from tag (e.g., "v20250403" -> "20250403")
+        ami_version = release_tag.lstrip('v')
+        
+        return ami_version, kmod_version
+    
+    def find_ami_for_driver_version(self, driver_version: str, architecture: str = "x86_64", 
+                                   k8s_version: Optional[str] = None, debug: bool = False) -> Optional[Tuple[str, str, str, str]]:
+        """Find AMI release that contains the specified driver version for given architecture."""
+        eks_parser = EKSAMIParser(verbose=debug)  # Use debug flag to control verbosity
+        
+        # Smart AMI type selection based on architecture and K8s version
+        if architecture.lower() == "arm64":
+            ami_types = ["AL2023_ARM_64_NVIDIA"]
+            if debug:
+                print(f"🔍 ARM64 architecture: limiting search to AL2023_ARM_64_NVIDIA")
+        elif k8s_version and not self.is_al2_supported(k8s_version):
+            ami_types = ["AL2023_x86_64_NVIDIA"]
+            if debug:
+                print(f"🔍 K8s {k8s_version} only supports AL2023, limiting search")
+        else:
+            ami_types = ["AL2023_x86_64_NVIDIA", "AL2_x86_64_GPU"]
+            if debug:
+                print(f"🔍 Searching both AL2023 and AL2 AMI types for driver {driver_version}")
+        
+        # Determine if this is a fuzzy search (incomplete version)
+        import re
+        is_fuzzy_search = not re.match(r'^\d+\.\d+\.\d+', driver_version)
+        
+        matches = eks_parser.find_releases_by_driver_version(
+            driver_version, fuzzy=True, k8s_version=k8s_version, 
+            ami_types=ami_types, architecture=architecture
+        )
+        
+        print(f"🔍 Found {len(matches) if matches else 0} matching {architecture} AMI releases")
+        
+        if not matches:
+            return None
+        
+        # Always show the matches found
+        print("📋 Compatible releases found:")
+        for i, (release_tag, release_date, k8s_ver, kmod_version, ami_type) in enumerate(matches):
+            arch_name = "ARM64" if "ARM" in ami_type else "x86_64"
+            print(f"   {i+1}. {release_tag} (K8s {k8s_ver}) - {ami_type} ({arch_name}): {kmod_version}")
+        
+        # If this is a fuzzy search and we found multiple matches, stop and ask for exact version
+        if is_fuzzy_search and len(matches) > 1:
+            print(f"\n🛑 Multiple driver versions found for search term '{driver_version}' on {architecture}")
+            print(f"   Please specify an exact driver version from the list above.")
+            print(f"   Examples:")
+            
+            # Show examples of exact versions they could use
+            unique_versions = set()
+            for _, _, _, kmod_version, _ in matches[:3]:  # Show first 3 unique versions
+                # Extract just the version number (e.g., "570.148.08" from "570.148.08-1.amzn2023")
+                version_match = re.search(r'(\d+\.\d+\.\d+)', kmod_version)
+                if version_match:
+                    unique_versions.add(version_match.group(1))
+                if len(unique_versions) >= 3:
+                    break
+            
+            for version in sorted(unique_versions):
+                print(f"     --current-driver-version {version} --architecture {architecture}")
+            
+            print(f"\n💡 Tip: Use exact versions for production deployments to ensure consistency")
+            return None
+        
+        # If exact search or only one match, proceed with selection
+        # Prefer AL2023 matches if available
+        al2023_matches = [m for m in matches if "AL2023" in m[4]]
+        if al2023_matches:
+            release_tag, release_date, k8s_ver, kmod_version, ami_type = al2023_matches[0]
+            arch_name = "ARM64" if "ARM" in ami_type else "x86_64"
+            print(f"🎯 Selected AL2023 release: {release_tag} ({arch_name})")
+        else:
+            release_tag, release_date, k8s_ver, kmod_version, ami_type = matches[0]
+            print(f"🎯 Selected AL2 release: {release_tag}")
+            print(f"⚠️  Note: Using deprecated AL2 AMI - consider migrating to AL2023")
+        
+        # Validate compatibility
+        if not self.validate_ami_compatibility(k8s_ver, ami_type):
+            print(f"⚠️  WARNING: Found driver {driver_version} in {ami_type} for K8s {k8s_ver}")
+            print(f"   But {ami_type} is not supported for Kubernetes {k8s_ver}")
+            print(f"   Consider using a different driver version available in AL2023")
+            return None
+        
+        ami_version = release_tag.lstrip('v')
+        return ami_version, k8s_ver, ami_type, kmod_version  # Return the actual driver version too
+    
+    def _get_default_nodegroup_template(self) -> Dict:
+        """Return a default nodegroup template from file - no hardcoded fallback."""
+        # Try to read from nodegroup_template.json
+        default_template_path = "nodegroup_template.json"
+        
         if os.path.exists(default_template_path):
             try:
                 with open(default_template_path, 'r') as f:
@@ -579,9 +767,6 @@ def main():
             print(f"   Remove the existing file first if you want to regenerate it")
             sys.exit(1)
         
-        # Generate comprehensive template with all AWS CLI parameters
-        # Use command line values if provided, otherwise use placeholders/defaults
-        
         # Architecture-specific defaults
         if args.architecture == "arm64":
             default_instances = ["g5g.xlarge"]
@@ -618,31 +803,10 @@ def main():
             # Update configuration
             "updateConfig": {
                 "maxUnavailable": 1
-                # Alternative: "maxUnavailablePercentage": 25
-                # "updateStrategy": "RollingUpdate"  # or "ForceUpdate"
             },
             
             # Network and access configuration
-            "remoteAccess": {
-                # "ec2SshKey": "your-ssh-key-name",
-                # "sourceSecurityGroups": ["sg-xxxxxxxxx"]
-            },
-            
-            # Launch template (optional - if using custom AMI or advanced config)
-            # "launchTemplate": {
-            #     "id": "lt-xxxxxxxxx",
-            #     "name": "your-launch-template-name", 
-            #     "version": "1"
-            # },
-            
-            # Kubernetes configuration
-            # "version": "1.31",  # Will be auto-detected from cluster
-            # "releaseVersion": "1.31-20250403",  # Will be set by alignment strategy
-            
-            # Node repair configuration (optional)
-            # "nodeRepairConfig": {
-            #     "enabled": true
-            # },
+            "remoteAccess": {},
             
             # Labels for node scheduling
             "labels": {
@@ -653,13 +817,7 @@ def main():
             },
             
             # Taints for node scheduling (optional)
-            "taints": [
-                # {
-                #     "key": "nvidia.com/gpu",
-                #     "value": "true", 
-                #     "effect": "NoSchedule"  # or "PreferNoSchedule", "NoExecute"
-                # }
-            ],
+            "taints": [],
             
             # Resource tags
             "tags": {
@@ -688,18 +846,6 @@ def main():
             print(f"   • instanceTypes: {default_instances}")
             print(f"   • amiType: {default_ami_type}")
             print(f"   • kubernetes.io/arch: {default_arch_label}")
-            
-            print(f"\n🔧 Command line values used:")
-            if args.nodegroup_name:
-                print(f"   • nodegroupName: {args.nodegroup_name}")
-            if args.instance_types:
-                print(f"   • instanceTypes: {args.instance_types}")
-            if args.capacity_type:
-                print(f"   • capacityType: {args.capacity_type}")
-            if args.disk_size:
-                print(f"   • diskSize: {args.disk_size}")
-            if any([args.min_size is not None, args.max_size is not None, args.desired_size is not None]):
-                print(f"   • scalingConfig: min={args.min_size}, max={args.max_size}, desired={args.desired_size}")
             
             print(f"\n🚀 After editing, you can run:")
             print(f"   python {os.path.basename(__file__)} --strategy ami-first --cluster-name your-cluster --architecture {args.architecture}")
@@ -737,7 +883,6 @@ def main():
     # Validate architecture-specific instance types if provided
     if args.instance_types:
         arm64_prefixes = ["g5g.", "c6g.", "m6g.", "r6g.", "t4g."]
-        x86_64_prefixes = ["g4dn.", "g5.", "p3.", "p4.", "c5.", "m5.", "r5."]
         
         for instance_type in args.instance_types:
             if args.architecture == "arm64":
@@ -789,7 +934,7 @@ def main():
     
     # Validate that we have all required parameters from template or command line
     required_params = {
-        'clusterName': args.cluster_name or "PLACEHOLDER",  # Will be set later if using k8s-version only
+        'clusterName': args.cluster_name or "PLACEHOLDER",
         'nodegroupName': args.nodegroup_name,
         'nodeRole': args.node_role_arn, 
         'subnets': args.subnet_ids
@@ -878,309 +1023,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()#!/usr/bin/env python3
-"""
-EKS NVIDIA Driver Alignment Tool
-
-This tool helps align NVIDIA drivers between EKS nodegroup AMIs and container images.
-It supports two strategies across x86_64 and ARM64 architectures:
-1. AMI-First: Use latest AMI, update container drivers to match
-2. Container-First: Use existing container drivers, find compatible AMI
-"""
-
-import argparse
-import json
-import os
-import requests
-import subprocess
-import sys
-from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass
-from eks_ami_parser import EKSAMIParser
-
-
-@dataclass
-class DriverAlignment:
-    strategy: str
-    k8s_version: str
-    architecture: str
-    ami_release_version: str
-    ami_driver_version: str
-    container_driver_version: str
-    formatted_driver_version: str
-    deb_urls: List[str]
-    nodegroup_config: Dict
-
-
-class EKSNodegroupManager:
-    def __init__(self, profile: str = "default", region: str = "eu-west-1"):
-        self.profile = profile
-        self.region = region
-        # AL2 End-of-Life Information
-        self.AL2_EOL_DATE = "2024-11-26"  # November 26, 2024
-        self.AL2_LAST_K8S_VERSION = "1.32"
-    
-    def get_cluster_k8s_version(self, cluster_name: str) -> str:
-        """Get the current Kubernetes version of the running cluster."""
-        cmd = [
-            "aws", "eks", "describe-cluster",
-            "--name", cluster_name,
-            "--profile", self.profile,
-            "--region", self.region,
-            "--query", "cluster.version",
-            "--output", "text"
-        ]
-        
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            k8s_version = result.stdout.strip()
-            print(f"🔍 Detected cluster Kubernetes version: {k8s_version}")
-            return k8s_version
-        except subprocess.CalledProcessError as e:
-            raise Exception(f"Failed to get cluster version: {e.stderr}")
-    
-    def is_al2_supported(self, k8s_version: str) -> bool:
-        """Check if AL2 AMIs are still supported for the given Kubernetes version."""
-        try:
-            version_parts = [int(x) for x in k8s_version.split('.')]
-            last_supported = [int(x) for x in self.AL2_LAST_K8S_VERSION.split('.')]
-            return version_parts <= last_supported
-        except (ValueError, IndexError):
-            return False
-    
-    def get_recommended_ami_type(self, k8s_version: str, architecture: str = "x86_64") -> str:
-        """Get the recommended AMI type for a given Kubernetes version and architecture."""
-        if architecture.lower() == "arm64":
-            return "AL2023_ARM_64_NVIDIA"
-        else:
-            return "AL2023_x86_64_NVIDIA"  # Always recommend AL2023 for x86_64
-    
-    def validate_ami_compatibility(self, k8s_version: str, ami_type: str) -> bool:
-        """Validate that the AMI type is compatible with the Kubernetes version."""
-        if ami_type == "AL2_x86_64_GPU" and not self.is_al2_supported(k8s_version):
-            return False
-        return True
-    
-    def get_latest_ami_for_k8s_version(self, k8s_version: str, architecture: str = "x86_64") -> Tuple[str, str]:
-        """Get the latest AMI release version and driver version for a K8s version and architecture."""
-        eks_parser = EKSAMIParser(verbose=False)  # Control verbosity through main debug flag
-        
-        # Get recommended AMI type for architecture
-        ami_type = self.get_recommended_ami_type(k8s_version, architecture)
-        result = eks_parser.find_latest_release_for_k8s(k8s_version, ami_type)
-        
-        if not result:
-            raise Exception(f"No {architecture} AMI found for Kubernetes version {k8s_version}")
-        
-        release_tag, release_date, kmod_version = result
-        # Extract version from tag (e.g., "v20250403" -> "20250403")
-        ami_version = release_tag.lstrip('v')
-        
-        return ami_version, kmod_version
-    
-    def find_ami_for_driver_version(self, driver_version: str, architecture: str = "x86_64", 
-                                   k8s_version: Optional[str] = None, debug: bool = False) -> Optional[Tuple[str, str, str, str]]:
-        """Find AMI release that contains the specified driver version for given architecture."""
-        eks_parser = EKSAMIParser(verbose=debug)  # Use debug flag to control verbosity
-        
-        # Smart AMI type selection based on architecture and K8s version
-        if architecture.lower() == "arm64":
-            ami_types = ["AL2023_ARM_64_NVIDIA"]
-            if debug:
-                print(f"🔍 ARM64 architecture: limiting search to AL2023_ARM_64_NVIDIA")
-        elif k8s_version and not self.is_al2_supported(k8s_version):
-            ami_types = ["AL2023_x86_64_NVIDIA"]
-            if debug:
-                print(f"🔍 K8s {k8s_version} only supports AL2023, limiting search")
-        else:
-            ami_types = ["AL2023_x86_64_NVIDIA", "AL2_x86_64_GPU"]
-            if debug:
-                print(f"🔍 Searching both AL2023 and AL2 AMI types for driver {driver_version}")
-        
-        # Determine if this is a fuzzy search (incomplete version)
-        import re
-        is_fuzzy_search = not re.match(r'^\d+\.\d+\.\d+', driver_version)
-        
-        matches = eks_parser.find_releases_by_driver_version(
-            driver_version, fuzzy=True, k8s_version=k8s_version, 
-            ami_types=ami_types, architecture=architecture
-        )
-        
-        print(f"🔍 Found {len(matches) if matches else 0} matching {architecture} AMI releases")
-        
-        if not matches:
-            return None
-        
-        # Always show the matches found
-        print("📋 Compatible releases found:")
-        for i, (release_tag, release_date, k8s_ver, kmod_version, ami_type) in enumerate(matches):
-            arch_name = "ARM64" if "ARM" in ami_type else "x86_64"
-            print(f"   {i+1}. {release_tag} (K8s {k8s_ver}) - {ami_type} ({arch_name}): {kmod_version}")
-        
-        # If this is a fuzzy search and we found multiple matches, stop and ask for exact version
-        if is_fuzzy_search and len(matches) > 1:
-            print(f"\n🛑 Multiple driver versions found for search term '{driver_version}' on {architecture}")
-            print(f"   Please specify an exact driver version from the list above.")
-            print(f"   Examples:")
-            
-            # Show examples of exact versions they could use
-            unique_versions = set()
-            for _, _, _, kmod_version, _ in matches[:3]:  # Show first 3 unique versions
-                # Extract just the version number (e.g., "570.148.08" from "570.148.08-1.amzn2023")
-                version_match = re.search(r'(\d+\.\d+\.\d+)', kmod_version)
-                if version_match:
-                    unique_versions.add(version_match.group(1))
-                if len(unique_versions) >= 3:
-                    break
-            
-            for version in sorted(unique_versions):
-                print(f"     --current-driver-version {version} --architecture {architecture}")
-            
-            print(f"\n💡 Tip: Use exact versions for production deployments to ensure consistency")
-            return None
-        
-        # If exact search or only one match, proceed with selection
-        # Prefer AL2023 matches if available
-        al2023_matches = [m for m in matches if "AL2023" in m[4]]
-        if al2023_matches:
-            release_tag, release_date, k8s_ver, kmod_version, ami_type = al2023_matches[0]
-            arch_name = "ARM64" if "ARM" in ami_type else "x86_64"
-            print(f"🎯 Selected AL2023 release: {release_tag} ({arch_name})")
-        else:
-            release_tag, release_date, k8s_ver, kmod_version, ami_type = matches[0]
-            print(f"🎯 Selected AL2 release: {release_tag}")
-            print(f"⚠️  Note: Using deprecated AL2 AMI - consider migrating to AL2023")
-        
-        # Validate compatibility
-        if not self.validate_ami_compatibility(k8s_ver, ami_type):
-            print(f"⚠️  WARNING: Found driver {driver_version} in {ami_type} for K8s {k8s_ver}")
-            print(f"   But {ami_type} is not supported for Kubernetes {k8s_ver}")
-            print(f"   Consider using a different driver version available in AL2023")
-            return None
-        
-        ami_version = release_tag.lstrip('v')
-        return ami_version, k8s_ver, ami_type, kmod_version  # Return the actual driver version too
-    
-    def create_nodegroup_from_template(self, template_path: str = None, template_config: Dict = None, 
-                                      overrides: Dict = None) -> Dict:
-        """Create EKS nodegroup using a JSON template with optional overrides."""
-        
-        # Load template
-        if template_path:
-            try:
-                with open(template_path, 'r') as f:
-                    config = json.load(f)
-                print(f"📋 Loaded nodegroup template: {template_path}")
-            except FileNotFoundError:
-                raise Exception(f"Template file not found: {template_path}")
-            except json.JSONDecodeError as e:
-                raise Exception(f"Invalid JSON in template file: {e}")
-        elif template_config:
-            config = template_config.copy()
-            print(f"📋 Using provided template configuration")
-        else:
-            # Use default template when none provided
-            config = self._get_default_nodegroup_template()
-            print(f"📋 Using default nodegroup template")
-        
-        # Apply overrides
-        if overrides:
-            print(f"🔧 Applying overrides:")
-            for key, value in overrides.items():
-                if key in config:
-                    old_value = config[key]
-                    config[key] = value
-                    print(f"   {key}: {old_value} → {value}")
-                else:
-                    config[key] = value
-                    print(f"   {key}: (new) → {value}")
-        
-        # Validate required fields
-        required_fields = ['clusterName', 'nodegroupName', 'nodeRole', 'subnets']
-        missing_fields = [field for field in required_fields if field not in config or not config[field]]
-        if missing_fields:
-            raise Exception(f"Missing required fields in configuration: {missing_fields}. " +
-                          f"These must be provided either in the template file or via command line arguments: " +
-                          f"--cluster-name, --nodegroup-name, --node-role-arn, --subnet-ids")
-        
-        # Build AWS CLI command
-        cmd = [
-            "aws", "eks", "create-nodegroup",
-            "--cluster-name", config["clusterName"],
-            "--nodegroup-name", config["nodegroupName"],
-            "--node-role", config["nodeRole"],
-            "--subnets", *config["subnets"],
-            "--profile", self.profile,
-            "--region", self.region,
-            "--no-cli-pager"
-        ]
-        
-        # Add optional parameters
-        if "instanceTypes" in config:
-            cmd.extend(["--instance-types", *config["instanceTypes"]])
-        
-        if "amiType" in config:
-            cmd.extend(["--ami-type", config["amiType"]])
-        
-        if "version" in config:
-            cmd.extend(["--version", config["version"]])
-        
-        if "releaseVersion" in config:
-            cmd.extend(["--release-version", config["releaseVersion"]])
-        
-        if "capacityType" in config:
-            cmd.extend(["--capacity-type", config["capacityType"]])
-        
-        if "diskSize" in config:
-            cmd.extend(["--disk-size", str(config["diskSize"])])
-        
-        if "scalingConfig" in config:
-            scaling = config["scalingConfig"]
-            scaling_arg = f"minSize={scaling.get('minSize', 0)},maxSize={scaling.get('maxSize', 10)},desiredSize={scaling.get('desiredSize', 1)}"
-            cmd.extend(["--scaling-config", scaling_arg])
-        
-        if "updateConfig" in config:
-            update = config["updateConfig"]
-            if "maxUnavailable" in update:
-                cmd.extend(["--update-config", f"maxUnavailable={update['maxUnavailable']}"])
-        
-        if "labels" in config:
-            labels = ",".join([f"{k}={v}" for k, v in config["labels"].items()])
-            cmd.extend(["--labels", labels])
-        
-        if "taints" in config:
-            taints = []
-            for taint in config["taints"]:
-                taint_str = f"{taint['key']}={taint.get('value', '')}:{taint['effect']}"
-                taints.append(taint_str)
-            cmd.extend(["--taints", ",".join(taints)])
-        
-        if "remoteAccess" in config:
-            remote = config["remoteAccess"]
-            if "ec2SshKey" in remote:
-                cmd.extend(["--remote-access", f"ec2SshKey={remote['ec2SshKey']}"])
-            if "sourceSecurityGroups" in remote:
-                cmd.extend(["--remote-access", f"sourceSecurityGroups={','.join(remote['sourceSecurityGroups'])}"])
-        
-        print(f"🚀 Creating nodegroup: {config['nodegroupName']}")
-        
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise Exception(f"Failed to create nodegroup: {result.stderr}")
-        
-        # Handle empty response (nodegroup creation is async, may not return JSON immediately)
-        if result.stdout.strip():
-            try:
-                return json.loads(result.stdout)
-            except json.JSONDecodeError:
-                # If JSON parsing fails, return a success indicator with the raw output
-                return {"success": True, "raw_output": result.stdout.strip()}
-        else:
-            return {"success": True, "message": "Nodegroup creation initiated (no immediate response)"}
-    
-    def _get_default_nodegroup_template(self) -> Dict:
-        """Return a default nodegroup template from file - no hardcoded fallback."""
-        # Try to read from nodegroup_template.json
-        default_template_path = "nodegroup_template.json"
-        
-        if os.path.exists(default
+    main()
