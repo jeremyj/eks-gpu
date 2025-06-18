@@ -10,7 +10,7 @@ import os
 from typing import Dict, Any, Optional
 
 # Import Phase 3 utilities
-from utils.template_utils import TemplateGenerator, TemplateValidator, TemplateMerger, TemplateError
+from utils.template_utils import TemplateGenerator, TemplateValidator, TemplateError
 from models.nodegroup_config import NodeGroupConfig
 from models.ami_types import Architecture
 
@@ -29,8 +29,8 @@ class TemplateCommand:
         """Register the template subcommand parser."""
         parser = subparsers.add_parser(
             'template',
-            help='Generate, validate, and merge nodegroup templates',
-            description='Manage EKS nodegroup templates with generation, validation, and merging capabilities.'
+            help='Generate and validate nodegroup templates',
+            description='Manage EKS nodegroup templates with generation and validation capabilities.'
         )
         
         # Operation selection
@@ -44,20 +44,9 @@ class TemplateCommand:
             '--validate',
             help='Validate an existing template file'
         )
-        operation_group.add_argument(
-            '--merge',
-            nargs='+',
-            help='Merge multiple template files'
-        )
         
         # Generation options
         generation_group = parser.add_argument_group('Generation Options')
-        generation_group.add_argument(
-            '--workload',
-            choices=['ml-training', 'ml-inference', 'general-gpu', 'custom'],
-            default='general-gpu',
-            help='Workload type for template generation (default: general-gpu)'
-        )
         generation_group.add_argument(
             '--cluster-name',
             help='EKS cluster name for template'
@@ -149,11 +138,9 @@ class TemplateCommand:
                 return self._generate_template(args, architecture, formatter)
             elif args.validate:
                 return self._validate_template(args, formatter)
-            elif args.merge:
-                return self._merge_templates(args, formatter)
             else:
                 formatter.print_status(
-                    "No operation specified. Use --generate, --validate, or --merge",
+                    "No operation specified. Use --generate or --validate",
                     'error'
                 )
                 return 1
@@ -201,12 +188,9 @@ class TemplateCommand:
                 # Set GPU defaults for the architecture
                 config.set_gpu_defaults(arch_enum)
             
-            # Generate template based on workload
-            with progress(f"Generating {args.workload} template", not args.quiet):
-                template = generator.generate_for_workload(args.workload, arch_enum)
-                
-                # Override template with our specific configuration
-                template.update({
+            # Generate basic template
+            with progress("Generating template", not args.quiet):
+                template = {
                     "clusterName": config.cluster_name,
                     "nodegroupName": config.nodegroup_name,
                     "nodeRole": config.node_role,
@@ -216,12 +200,14 @@ class TemplateCommand:
                     "capacityType": config.capacity_type,
                     "diskSize": config.disk_size,
                     "scalingConfig": config.scaling_config.to_dict(),
+                    "updateConfig": {"maxUnavailable": 1},
                     "labels": config.labels,
+                    "taints": [],
                     "tags": config.tags
-                })
+                }
             
             # Output template
-            output_file = args.output_file or f"nodegroup-{args.workload}-{architecture}.json"
+            output_file = args.output_file or f"nodegroup-{architecture}.json"
             
             with progress(f"Writing template to {output_file}", not args.quiet):
                 with open(output_file, 'w') as f:
@@ -229,7 +215,7 @@ class TemplateCommand:
             
             formatter.print_template_results({
                 'name': args.nodegroup_name or f"gpu-workers-{architecture}",
-                'type': args.workload,
+                'type': 'basic',
                 'architecture': architecture,
                 'nodegroup': template
             })
@@ -240,7 +226,6 @@ class TemplateCommand:
             if not args.quiet:
                 arch_display = architecture.upper() if architecture == "arm64" else "x86_64"
                 formatter.print_status(f"Configuration for {arch_display}:", 'info')
-                formatter.print_status(f"  • Workload: {args.workload}", 'info')
                 formatter.print_status(f"  • Instance types: {config.instance_types}", 'info')
                 formatter.print_status(f"  • Capacity type: {config.capacity_type}", 'info')
                 formatter.print_status(f"  • Scaling: {config.scaling_config.min_size}-{config.scaling_config.max_size} nodes", 'info')
@@ -298,68 +283,6 @@ class TemplateCommand:
             formatter.print_status(f"Validation error: {e}", 'error')
             return 1
     
-    def _merge_templates(self, args: argparse.Namespace,
-                        formatter: OutputFormatter) -> int:
-        """Merge multiple template files."""
-        try:
-            if len(args.merge) < 2:
-                formatter.print_status("At least 2 template files required for merging", 'error')
-                return 1
-            
-            # Load templates
-            templates = []
-            for i, template_file in enumerate(args.merge):
-                print_step(i + 1, len(args.merge), f"Loading {template_file}", not args.quiet)
-                
-                if not os.path.exists(template_file):
-                    formatter.print_status(f"Template file not found: {template_file}", 'error')
-                    return 1
-                
-                try:
-                    with open(template_file, 'r') as f:
-                        template = json.load(f)
-                        templates.append(template)
-                except json.JSONDecodeError as e:
-                    formatter.print_status(f"Invalid JSON in {template_file}: {e}", 'error')
-                    return 1
-            
-            # Merge templates
-            with progress("Merging templates", not args.quiet):
-                merger = TemplateMerger()
-                merged_template = merger.merge_templates(templates)
-            
-            # Validate merged template
-            with progress("Validating merged template", not args.quiet):
-                is_valid, errors = TemplateValidator.validate_template(merged_template)
-            
-            if not is_valid:
-                formatter.print_status("Merged template validation failed", 'warning')
-                for error in errors:
-                    formatter.print_status(f"  • {error}", 'warning')
-            
-            # Output merged template
-            output_file = args.output_file or "merged-template.json"
-            
-            with progress(f"Writing merged template to {output_file}", not args.quiet):
-                with open(output_file, 'w') as f:
-                    json.dump(merged_template, f, indent=2)
-            
-            formatter.print_status(f"Templates merged: {output_file}", 'success')
-            
-            # Show merge summary
-            if not args.quiet:
-                formatter.print_status(f"Merged {len(templates)} templates:", 'info')
-                for template_file in args.merge:
-                    formatter.print_status(f"  • {template_file}", 'info')
-            
-            return 0
-            
-        except TemplateError as e:
-            formatter.print_status(f"Template merge failed: {e}", 'error')
-            return 1
-        except Exception as e:
-            formatter.print_status(f"Merge error: {e}", 'error')
-            return 1
     
     def _get_default_instances(self, architecture: str) -> list:
         """Get default instance types for architecture."""
