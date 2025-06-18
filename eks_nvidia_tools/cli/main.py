@@ -42,7 +42,7 @@ class EKSNvidiaToolsCLI:
 Examples:
   eks-nvidia-tools parse --k8s-version 1.32 --architecture arm64
   eks-nvidia-tools align --strategy ami-first --cluster-name my-cluster
-  eks-nvidia-tools template --generate --workload ml-training
+  eks-nvidia-tools template --generate --architecture arm64
   eks-nvidia-tools version
             """
         )
