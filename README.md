@@ -512,44 +512,6 @@ aws eks create-nodegroup --cli-input-json file://x86-nodegroup-config.json
 aws eks create-nodegroup --cli-input-json file://arm64-nodegroup-config.json
 ```
 
-## Migration Guide
-
-### From Legacy Scripts to Unified CLI
-
-The new unified CLI maintains full backward compatibility while providing enhanced functionality:
-
-#### Legacy Command Mapping
-
-| Legacy Command | New Unified Command |
-|----------------|-------------------|
-| `python eks_ami_parser.py --k8s-version 1.32` | `python -m eks_nvidia_tools.cli.main parse --k8s-version 1.32` |
-| `python eks_nvidia_alignment.py --strategy ami-first` | `python -m eks_nvidia_tools.cli.main align --strategy ami-first` |
-| `python eks_nvidia_alignment.py --generate-template` | `python -m eks_nvidia_tools.cli.main template --generate` |
-
-#### Migration Benefits
-
-- **Consistent Interface** - Unified argument parsing and validation
-- **Enhanced Output** - Multiple formats (table, JSON, YAML)
-- **Better Error Handling** - Detailed validation and helpful messages
-- **Progress Feedback** - Real-time operation status
-- **Improved Help** - Comprehensive documentation and examples
-
-#### Gradual Migration Approach
-
-1. **Phase 1**: Start using new commands alongside legacy scripts
-2. **Phase 2**: Update automation scripts to use new CLI
-3. **Phase 3**: Deprecate legacy script usage
-4. **Phase 4**: Remove legacy scripts (optional)
-
-```bash
-# Legacy scripts still work with deprecation warnings
-python eks_ami_parser.py --k8s-version 1.32
-# Warning: eks_ami_parser.py is deprecated. Please use 'eks-nvidia-tools parse' instead.
-
-# New unified interface
-python -m eks_nvidia_tools.cli.main parse --k8s-version 1.32 --output json
-```
-
 ## Troubleshooting
 
 ### Common Issues and Solutions
