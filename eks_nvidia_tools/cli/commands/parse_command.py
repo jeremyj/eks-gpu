@@ -296,7 +296,7 @@ class ParseCommand:
                 # Convert matches to the expected format for output
                 results = []
                 for release_tag, release_date, k8s_ver, kmod_version, ami_type in matches:
-                    results.append((release_tag, kmod_version, release_date))
+                    results.append((release_tag, kmod_version, ami_type))
                 
                 formatter.print_ami_results(results)
             else:
@@ -351,7 +351,7 @@ class ParseCommand:
                 
                 if result:
                     release_tag, release_date, kmod_version = result
-                    results.append((release_tag, kmod_version, release_date))
+                    results.append((release_tag, kmod_version, ami_type.value))
                     
                     if not formatter.quiet:
                         print(f"  ✓ {ami_type_str} ({arch_name}): {kmod_version}")

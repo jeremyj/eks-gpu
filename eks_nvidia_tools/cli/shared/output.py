@@ -110,7 +110,7 @@ class OutputFormatter:
         if len(results[0]) == 2:
             headers = ['Release Version', 'Driver Version']
         elif len(results[0]) == 3:
-            headers = ['Release Version', 'Driver Version', 'Release Date']
+            headers = ['Release Version', 'Driver Version', 'Package']
         else:
             headers = [f'Field {i+1}' for i in range(len(results[0]))]
         
@@ -159,7 +159,7 @@ class OutputFormatter:
             return {
                 'release_version': ami_tuple[0],
                 'driver_version': ami_tuple[1],
-                'release_date': ami_tuple[2]
+                'package': ami_tuple[2]
             }
         else:
             return {f'field_{i+1}': value for i, value in enumerate(ami_tuple)}
