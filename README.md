@@ -67,6 +67,38 @@ Managing NVIDIA drivers in Kubernetes environments requires careful coordination
 pip install beautifulsoup4 tabulate pyyaml requests
 ```
 
+### Wrapper Installation (Recommended)
+
+For the easiest experience, install the wrapper script that allows you to use `eks-nvidia-tools` from anywhere:
+
+```bash
+# Clone the repository and navigate to it
+cd eks-gpu
+
+# Install wrapper to ~/.local/bin (recommended)
+./install-wrapper.sh --local
+
+# Add ~/.local/bin to your PATH if it's not already there
+echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
+source ~/.bashrc
+
+# Now you can use eks-nvidia-tools from anywhere
+eks-nvidia-tools version
+```
+
+#### Alternative Installation Options
+
+```bash
+# Install globally (requires sudo)
+sudo ./install-wrapper.sh --global
+
+# Use local wrapper without installation
+./eks-nvidia-tools-local <command> [options]
+
+# Use direct Python module execution
+python -m eks_nvidia_tools.cli.main <command> [options]
+```
+
 ### AWS Permissions
 
 Your AWS credentials need these permissions:
@@ -129,14 +161,18 @@ The unified CLI provides four main commands:
 ### Basic Command Structure
 
 ```bash
+# Method 1: Direct Python module execution
 python -m eks_nvidia_tools.cli.main <command> [options]
 
-# Global AWS options (can be used with any command):
-python -m eks_nvidia_tools.cli.main --aws-profile production --aws-region us-west-2 <command> [options]
+# Method 2: Using the wrapper script (recommended)
+./eks-nvidia-tools-local <command> [options]
 
-# Or create an alias for convenience:
-alias eks-nvidia-tools="python -m eks_nvidia_tools.cli.main"
-eks-nvidia-tools parse --help
+# Method 3: Install wrapper globally (easiest for regular use)
+./install-wrapper.sh --local  # Installs to ~/.local/bin
+eks-nvidia-tools <command> [options]  # Use from anywhere
+
+# Global AWS options (can be used with any command):
+eks-nvidia-tools --aws-profile production --aws-region us-west-2 <command> [options]
 ```
 
 ## Command Reference
