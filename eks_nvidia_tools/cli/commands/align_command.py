@@ -19,7 +19,7 @@ from ..shared.arguments import (
 from ..shared.output import OutputFormatter
 from ..shared.validation import (
     validate_k8s_version, validate_architecture, validate_cluster_name,
-    validate_driver_version, ValidationError
+    validate_driver_version, validate_aws_region, validate_aws_profile, ValidationError
 )
 from ..shared.progress import progress, print_step, print_separator
 
@@ -219,6 +219,14 @@ class AlignCommand:
     def _validate_arguments(self, args: argparse.Namespace, 
                           formatter: OutputFormatter) -> int:
         """Validate command arguments."""
+        # Validate AWS arguments
+        try:
+            validate_aws_profile(args.profile)
+            validate_aws_region(args.region)
+        except ValidationError as e:
+            formatter.print_status(str(e), 'error')
+            return 1
+        
         # Validate Kubernetes version if provided
         if args.k8s_version:
             try:
