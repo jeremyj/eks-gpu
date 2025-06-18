@@ -22,7 +22,7 @@ python -m eks_nvidia_tools.cli.main align \
     --region us-west-2
 
 # Generate nodegroup templates
-python -m eks_nvidia_tools.cli.main template --generate --workload ml-training --architecture arm64
+python -m eks_nvidia_tools.cli.main template --generate --architecture arm64
 ```
 
 ## 📋 Table of Contents
@@ -123,7 +123,7 @@ The unified CLI provides four main commands:
 |---------|---------|---------|
 | `parse` | Parse EKS AMI releases and find NVIDIA driver versions | `parse --k8s-version 1.32` |
 | `align` | Align NVIDIA drivers between AMIs and containers | `align --strategy ami-first` |
-| `template` | Generate, validate, and merge nodegroup templates | `template --generate --workload ml-training` |
+| `template` | Generate and validate nodegroup templates | `template --generate --architecture arm64` |
 | `version` | Show version and capability information | `version --verbose` |
 
 ### Basic Command Structure
@@ -151,7 +151,7 @@ python -m eks_nvidia_tools.cli.main parse [options]
 
 # Key options:
 --k8s-version VERSION          # Kubernetes version (e.g., 1.32, 1.31)
---driver-version VERSION       # NVIDIA driver version to search
+--driver-version VERSION       # NVIDIA driver version to search (supports major-only: 550, 570)
 --architecture {x86_64,arm64}  # Target architecture
 --ami-type TYPE                # Specific AMI type to search
 --fuzzy                        # Use fuzzy matching for driver search
@@ -195,7 +195,7 @@ python -m eks_nvidia_tools.cli.main align --strategy STRATEGY [options]
 
 ### Template Command
 
-Generate, validate, and merge nodegroup templates.
+Generate and validate nodegroup templates.
 
 ```bash
 # Basic usage
@@ -204,10 +204,8 @@ python -m eks_nvidia_tools.cli.main template [operation] [options]
 # Operations:
 --generate                     # Generate new template
 --validate FILE                # Validate existing template
---merge FILE [FILE...]         # Merge multiple templates
 
 # Generation options:
---workload {ml-training,ml-inference,general-gpu,custom}
 --cluster-name NAME            # EKS cluster name
 --nodegroup-name NAME          # Nodegroup name
 --architecture {x86_64,arm64}  # Target architecture
@@ -263,7 +261,7 @@ python -m eks_nvidia_tools.cli.main parse --k8s-version 1.32 --architecture x86_
 python -m eks_nvidia_tools.cli.main parse --k8s-version 1.32 --architecture arm64
 
 # Template generation for ARM64
-python -m eks_nvidia_tools.cli.main template --generate --workload ml-training --architecture arm64
+python -m eks_nvidia_tools.cli.main template --generate --architecture arm64
 
 # Supported AMI types:
 # - AL2023_ARM_64_NVIDIA
@@ -279,8 +277,8 @@ python -m eks_nvidia_tools.cli.main parse --driver-version 570.124.06 --architec
 python -m eks_nvidia_tools.cli.main parse --driver-version 570.124.06 --architecture arm64
 
 # Generate templates for multi-arch deployment
-python -m eks_nvidia_tools.cli.main template --generate --workload general-gpu --architecture x86_64 --output-file x86-template.json
-python -m eks_nvidia_tools.cli.main template --generate --workload general-gpu --architecture arm64 --output-file arm64-template.json
+python -m eks_nvidia_tools.cli.main template --generate --architecture x86_64 --output-file x86-template.json
+python -m eks_nvidia_tools.cli.main template --generate --architecture arm64 --output-file arm64-template.json
 ```
 
 ## Driver Alignment Strategies
@@ -562,9 +560,14 @@ aws eks create-nodegroup --cli-input-json file://arm64-nodegroup-config.json
 
 ```bash
 # Problem: No compatible AMI found for driver version
-# Solution: Use fuzzy search to find similar versions
+# Solution: Use major-only version search or fuzzy search
 python -m eks_nvidia_tools.cli.main parse \
     --driver-version 570 \
+    --architecture x86_64
+
+# Or use fuzzy search for partial matches
+python -m eks_nvidia_tools.cli.main parse \
+    --driver-version 570.124 \
     --fuzzy \
     --architecture x86_64
 
@@ -680,11 +683,11 @@ $ python -m eks_nvidia_tools.cli.main parse --k8s-version 1.32 --latest
 
 Finding latest release for K8s 1.32... ✓ Done (2.1s)
 
-┌─────────────────┬──────────────────┬─────────────────┐
-│ Release Version │ Driver Version   │ Release Date    │
-├─────────────────┼──────────────────┼─────────────────┤
-│ v20241121       │ 570.124.06       │ 2024-11-21      │
-└─────────────────┴──────────────────┴─────────────────┘
+┌─────────────────┬──────────────────┬──────────────────────────┐
+│ Release Version │ Driver Version   │ Package                  │
+├─────────────────┼──────────────────┼──────────────────────────┤
+│ v20241121       │ 570.124.06       │ AL2023_x86_64_NVIDIA     │
+└─────────────────┴──────────────────┴──────────────────────────┘
 ```
 
 ### Align Command Output
