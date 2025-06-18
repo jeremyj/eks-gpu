@@ -14,9 +14,11 @@ from utils.template_utils import TemplateGenerator, TemplateValidator, TemplateM
 from models.nodegroup_config import NodeGroupConfig
 from models.ami_types import Architecture
 
-from ..shared.arguments import add_architecture_args, add_output_args
+from ..shared.arguments import add_architecture_args, add_output_args, add_aws_args
 from ..shared.output import OutputFormatter
-from ..shared.validation import validate_architecture, ValidationError
+from ..shared.validation import (
+    validate_architecture, validate_aws_region, validate_aws_profile, ValidationError
+)
 from ..shared.progress import progress, print_step
 
 
@@ -107,6 +109,10 @@ class TemplateCommand:
             help='Desired number of nodes (default: 1)'
         )
         
+        # AWS options (for consistency across commands)
+        aws_group = parser.add_argument_group('AWS Options')
+        add_aws_args(aws_group)
+        
         # Output options
         output_group = parser.add_argument_group('Output Options')
         output_group.add_argument(
@@ -122,6 +128,14 @@ class TemplateCommand:
         try:
             # Initialize formatter
             formatter = OutputFormatter(args.output, args.quiet)
+            
+            # Validate AWS arguments
+            try:
+                validate_aws_profile(args.profile)
+                validate_aws_region(args.region)
+            except ValidationError as e:
+                formatter.print_status(str(e), 'error')
+                return 1
             
             # Validate architecture
             try:

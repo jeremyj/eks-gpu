@@ -14,8 +14,12 @@ python -m eks_nvidia_tools.cli.main version --verbose
 # Parse AMI releases for driver information
 python -m eks_nvidia_tools.cli.main parse --k8s-version 1.32 --architecture arm64
 
-# Align drivers between AMI and containers
-python -m eks_nvidia_tools.cli.main align --strategy ami-first --cluster-name my-cluster
+# Align drivers between AMI and containers (with AWS profile and region)
+python -m eks_nvidia_tools.cli.main align \
+    --strategy ami-first \
+    --cluster-name my-cluster \
+    --profile production \
+    --region us-west-2
 
 # Generate nodegroup templates
 python -m eks_nvidia_tools.cli.main template --generate --workload ml-training --architecture arm64
@@ -31,9 +35,7 @@ python -m eks_nvidia_tools.cli.main template --generate --workload ml-training -
 - [Driver Alignment Strategies](#driver-alignment-strategies)
 - [Template Management](#template-management)
 - [Comprehensive Examples](#comprehensive-examples)
-- [Migration Guide](#migration-guide)
 - [Troubleshooting](#troubleshooting)
-- [Legacy Compatibility](#legacy-compatibility)
 
 ## Overview
 
@@ -51,7 +53,6 @@ Managing NVIDIA drivers in Kubernetes environments requires careful coordination
 - 📝 **Template Management** - Generate, validate, and merge nodegroup templates
 - 🔍 **Comprehensive Validation** - Input validation with helpful error messages
 - 📈 **Progress Indicators** - Real-time feedback during operations
-- 🔙 **Backward Compatibility** - Legacy script support with deprecation warnings
 
 ## Installation
 
@@ -87,6 +88,33 @@ Your AWS credentials need these permissions:
 }
 ```
 
+### AWS Configuration
+
+The CLI supports AWS profile and region specification in multiple ways:
+
+```bash
+# Global options (apply to all commands)
+python -m eks_nvidia_tools.cli.main --aws-profile production --aws-region us-west-2 <command>
+
+# Command-specific options
+python -m eks_nvidia_tools.cli.main align --strategy ami-first --profile staging --region eu-central-1
+
+# Environment variables (fallback)
+export AWS_PROFILE=production
+export AWS_DEFAULT_REGION=us-west-2
+python -m eks_nvidia_tools.cli.main align --strategy ami-first
+
+# AWS CLI default profile and region (fallback)
+aws configure set default.region us-east-1
+python -m eks_nvidia_tools.cli.main align --strategy ami-first
+```
+
+**Priority Order:**
+1. Command-line arguments (`--profile`, `--region`)
+2. Global CLI arguments (`--aws-profile`, `--aws-region`)
+3. Environment variables (`AWS_PROFILE`, `AWS_DEFAULT_REGION`)
+4. AWS CLI configuration files
+
 ## Unified CLI Commands
 
 The unified CLI provides four main commands:
@@ -102,6 +130,9 @@ The unified CLI provides four main commands:
 
 ```bash
 python -m eks_nvidia_tools.cli.main <command> [options]
+
+# Global AWS options (can be used with any command):
+python -m eks_nvidia_tools.cli.main --aws-profile production --aws-region us-west-2 <command> [options]
 
 # Or create an alias for convenience:
 alias eks-nvidia-tools="python -m eks_nvidia_tools.cli.main"
@@ -273,7 +304,9 @@ Use the latest EKS AMI and update container drivers to match.
 python -m eks_nvidia_tools.cli.main align \
     --strategy ami-first \
     --cluster-name my-production-cluster \
-    --architecture x86_64
+    --architecture x86_64 \
+    --profile production \
+    --region us-east-1
 
 # AMI-first with custom configuration
 python -m eks_nvidia_tools.cli.main align \
@@ -282,7 +315,9 @@ python -m eks_nvidia_tools.cli.main align \
     --nodegroup-name gpu-workers-v2 \
     --instance-types g5.2xlarge g5.4xlarge \
     --capacity-type SPOT \
-    --min-size 2 --max-size 20 --desired-size 5
+    --min-size 2 --max-size 20 --desired-size 5 \
+    --profile production \
+    --region us-west-2
 ```
 
 ### Container-First Strategy
@@ -291,11 +326,11 @@ Keep existing container drivers and find compatible AMI.
 
 **Benefits:**
 - ✅ No container image changes required
-- ✅ Useful for legacy applications
+- ✅ Useful for existing applications
 - ✅ Minimal disruption to existing workflows
 
 **Use Cases:**
-- Legacy application support
+- Existing application support
 - Vendor-locked container images
 - Gradual migration scenarios
 
@@ -304,7 +339,9 @@ Keep existing container drivers and find compatible AMI.
 python -m eks_nvidia_tools.cli.main align \
     --strategy container-first \
     --current-driver-version 570.124.06 \
-    --cluster-name my-production-cluster
+    --cluster-name my-production-cluster \
+    --profile production \
+    --region eu-west-1
 
 # Container-first with specific K8s version
 python -m eks_nvidia_tools.cli.main align \
@@ -312,7 +349,9 @@ python -m eks_nvidia_tools.cli.main align \
     --current-driver-version 550.127.08 \
     --k8s-version 1.31 \
     --architecture arm64 \
-    --nodegroup-name legacy-gpu-workers
+    --nodegroup-name existing-gpu-workers \
+    --profile staging \
+    --region ap-southeast-1
 ```
 
 ## Template Management
@@ -398,6 +437,8 @@ python -m eks_nvidia_tools.cli.main align \
     --strategy ami-first \
     --cluster-name ml-production \
     --template ml-training-template.json \
+    --profile production \
+    --region us-east-1 \
     --output-file ml-nodegroup-config.json
 
 # Step 5: Review configuration before deployment
@@ -441,7 +482,7 @@ python -m eks_nvidia_tools.cli.main align \
     --output-file arm64-nodegroup-config.json
 ```
 
-### Example 3: Legacy Container Migration
+### Example 3: Existing Container Migration
 
 ```bash
 # Step 1: Identify current container driver version
@@ -457,16 +498,16 @@ python -m eks_nvidia_tools.cli.main parse \
 python -m eks_nvidia_tools.cli.main align \
     --strategy container-first \
     --current-driver-version 525.147.05 \
-    --cluster-name legacy-cluster \
-    --nodegroup-name legacy-gpu-workers \
+    --cluster-name existing-cluster \
+    --nodegroup-name existing-gpu-workers \
     --architecture x86_64 \
     --output yaml
 
 # Step 4: Plan migration to newer drivers
 python -m eks_nvidia_tools.cli.main align \
     --strategy ami-first \
-    --cluster-name legacy-cluster \
-    --nodegroup-name modern-gpu-workers \
+    --cluster-name existing-cluster \
+    --nodegroup-name updated-gpu-workers \
     --plan-only
 ```
 
@@ -512,43 +553,6 @@ aws eks create-nodegroup --cli-input-json file://x86-nodegroup-config.json
 aws eks create-nodegroup --cli-input-json file://arm64-nodegroup-config.json
 ```
 
-## Migration Guide
-
-### From Legacy Scripts to Unified CLI
-
-The new unified CLI maintains full backward compatibility while providing enhanced functionality:
-
-#### Legacy Command Mapping
-
-| Legacy Command | New Unified Command |
-|----------------|-------------------|
-| `python eks_ami_parser.py --k8s-version 1.32` | `python -m eks_nvidia_tools.cli.main parse --k8s-version 1.32` |
-| `python eks_nvidia_alignment.py --strategy ami-first` | `python -m eks_nvidia_tools.cli.main align --strategy ami-first` |
-| `python eks_nvidia_alignment.py --generate-template` | `python -m eks_nvidia_tools.cli.main template --generate` |
-
-#### Migration Benefits
-
-- **Consistent Interface** - Unified argument parsing and validation
-- **Enhanced Output** - Multiple formats (table, JSON, YAML)
-- **Better Error Handling** - Detailed validation and helpful messages
-- **Progress Feedback** - Real-time operation status
-- **Improved Help** - Comprehensive documentation and examples
-
-#### Gradual Migration Approach
-
-1. **Phase 1**: Start using new commands alongside legacy scripts
-2. **Phase 2**: Update automation scripts to use new CLI
-3. **Phase 3**: Deprecate legacy script usage
-4. **Phase 4**: Remove legacy scripts (optional)
-
-```bash
-# Legacy scripts still work with deprecation warnings
-python eks_ami_parser.py --k8s-version 1.32
-# Warning: eks_ami_parser.py is deprecated. Please use 'eks-nvidia-tools parse' instead.
-
-# New unified interface
-python -m eks_nvidia_tools.cli.main parse --k8s-version 1.32 --output json
-```
 
 ## Troubleshooting
 
@@ -603,13 +607,38 @@ python -m eks_nvidia_tools.cli.main template \
 ```bash
 # Problem: AccessDenied errors
 # Solution: Verify AWS configuration and permissions
-aws sts get-caller-identity
-aws eks describe-cluster --name my-cluster
+aws sts get-caller-identity --profile production
+aws eks describe-cluster --name my-cluster --profile production --region us-west-2
 
 # Check EKS permissions:
 # - eks:DescribeCluster
 # - eks:DescribeNodegroup
 # - eks:CreateNodegroup
+
+# Test with specific profile and region
+python -m eks_nvidia_tools.cli.main align \
+    --strategy ami-first \
+    --cluster-name my-cluster \
+    --profile production \
+    --region us-west-2 \
+    --plan-only
+```
+
+#### 5. AWS Profile/Region Configuration Issues
+
+```bash
+# Problem: Invalid AWS profile or region format
+# Solution: Use valid AWS profile and region names
+python -m eks_nvidia_tools.cli.main parse \
+    --profile my-production-profile \
+    --region us-east-1
+
+# Problem: Profile doesn't exist
+# Solution: List available profiles and create if needed
+aws configure list-profiles
+aws configure set --profile new-profile region us-west-2
+aws configure set --profile new-profile aws_access_key_id YOUR_KEY
+aws configure set --profile new-profile aws_secret_access_key YOUR_SECRET
 ```
 
 ### Debug Mode
@@ -641,37 +670,6 @@ python -m eks_nvidia_tools.cli.main template \
     --output yaml > training-config.yaml
 ```
 
-## Legacy Compatibility
-
-### Backward Compatibility Support
-
-The unified CLI maintains full backward compatibility with legacy scripts:
-
-```bash
-# Legacy scripts continue to work
-python eks_ami_parser.py --k8s-version 1.32
-python eks_nvidia_alignment.py --strategy ami-first --cluster-name my-cluster
-
-# Deprecation warnings guide users to new interface
-# Warning: eks_ami_parser.py is deprecated. Please use 'eks-nvidia-tools parse' instead.
-```
-
-### Legacy Script Mapping
-
-| Legacy Script | Purpose | New Command |
-|---------------|---------|-------------|
-| `eks_ami_parser.py` | AMI parsing and driver search | `parse` |
-| `eks_nvidia_alignment.py` | Driver alignment and nodegroup config | `align` + `template` |
-
-### Migration Assistance
-
-The new CLI provides enhanced capabilities not available in legacy scripts:
-
-- **Template Management** - Generate, validate, merge templates
-- **Multi-Format Output** - JSON, YAML, table formats
-- **Architecture Support** - Explicit ARM64 support
-- **Progress Feedback** - Real-time operation status
-- **Enhanced Validation** - Comprehensive input validation
 
 ## Output Examples
 
@@ -743,11 +741,14 @@ Contributions are welcome! This project follows a modular architecture with clea
 
 ```
 eks_nvidia_tools/
-├── cli/                    # CLI interface and commands
-├── core/                   # Core AMI parsing logic
-├── models/                 # Data models and types
-├── utils/                  # Utility functions
-└── tests/                  # Test suites
+├── cli/                    # Unified CLI interface and commands
+│   ├── commands/           # Individual command implementations
+│   ├── shared/             # Shared utilities (arguments, output, validation)
+│   └── legacy/             # Backward compatibility wrappers
+├── core/                   # Core AMI parsing and GitHub integration
+├── models/                 # Data models and types (AMI, NodeGroup, etc.)
+├── utils/                  # Utility functions (templates, architecture)
+└── tests/                  # Comprehensive test suites
 ```
 
 ### Development Setup

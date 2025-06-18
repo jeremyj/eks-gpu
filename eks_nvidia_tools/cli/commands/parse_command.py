@@ -12,11 +12,12 @@ from core.ami_resolver import EKSAMIResolver, AMIResolutionError
 from models.ami_types import AMIType, Architecture, AMITypeManager
 
 from ..shared.arguments import (
-    add_architecture_args, add_kubernetes_args, add_driver_args, add_output_args
+    add_architecture_args, add_kubernetes_args, add_driver_args, add_output_args, add_aws_args
 )
 from ..shared.output import OutputFormatter
 from ..shared.validation import (
-    validate_k8s_version, validate_architecture, validate_driver_version, ValidationError
+    validate_k8s_version, validate_architecture, validate_driver_version, 
+    validate_aws_region, validate_aws_profile, ValidationError
 )
 from ..shared.progress import progress, print_step
 
@@ -67,6 +68,10 @@ class ParseCommand:
         output_group = parser.add_argument_group('Output Options')
         add_output_args(output_group)
         
+        # AWS options (for consistency across commands)
+        aws_group = parser.add_argument_group('AWS Options')
+        add_aws_args(aws_group)
+        
         # Debug options
         debug_group = parser.add_argument_group('Debug Options')
         debug_group.add_argument(
@@ -79,6 +84,14 @@ class ParseCommand:
     def execute(self, args: argparse.Namespace) -> int:
         """Execute the parse command."""
         try:
+            # Validate AWS arguments
+            try:
+                validate_aws_profile(args.profile)
+                validate_aws_region(args.region)
+            except ValidationError as e:
+                print(f"Error: {e}")
+                return 1
+            
             # Initialize components
             resolver = EKSAMIResolver(verbose=args.verbose)
             ami_manager = AMITypeManager()

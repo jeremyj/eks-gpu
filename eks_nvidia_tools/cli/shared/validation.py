@@ -190,6 +190,34 @@ def validate_aws_region(region: str) -> str:
     return region
 
 
+def validate_aws_profile(profile: str) -> str:
+    """
+    Validate AWS profile name.
+    
+    Args:
+        profile: AWS profile name to validate
+    
+    Returns:
+        Validated profile name
+    
+    Raises:
+        ValidationError: If profile name is invalid
+    """
+    if not profile:
+        raise ValidationError("AWS profile cannot be empty")
+    
+    # AWS profile names can contain letters, numbers, hyphens, and underscores
+    pattern = r'^[a-zA-Z0-9_-]+$'
+    
+    if not re.match(pattern, profile):
+        raise ValidationError(
+            f"Invalid AWS profile name: {profile}. "
+            "Profile names can only contain letters, numbers, hyphens, and underscores"
+        )
+    
+    return profile
+
+
 def validate_output_format(format_type: str) -> str:
     """
     Validate output format.

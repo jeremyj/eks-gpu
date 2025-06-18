@@ -50,6 +50,12 @@ Examples:
         # Global options
         parser.add_argument('--verbose', '-v', action='store_true',
                           help='Enable verbose output')
+        parser.add_argument('--aws-profile', '--profile',
+                          default='default',
+                          help='AWS profile to use (default: default)')
+        parser.add_argument('--aws-region', '--region',
+                          default='eu-west-1',
+                          help='AWS region (default: eu-west-1)')
         
         # Create subparsers
         subparsers = parser.add_subparsers(
