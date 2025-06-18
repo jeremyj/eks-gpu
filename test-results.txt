@@ -1,0 +1,264 @@
+(vp311) elaine company/eks-gpu ‹main*› » python ./run_tests.py 
+🚀 EKS NVIDIA TOOLS - TEST RUNNER
+============================================================
+Testing refactored modules (Phases 2 & 3)
+Creating models/__init__.py...
+Creating core/__init__.py...
+Creating utils/__init__.py...
+🔍 Checking module structure...
+✅ All required module files found
+
+============================================================
+🧪 RUNNING PHASE 2 MODELS TESTS
+============================================================
+🧪 TESTING PHASE 2 MODELS
+============================================================
+
+📋 DriverAlignment Basic:
+✅ DriverAlignment creation
+✅ architecture_display property
+✅ is_ami_first_strategy property
+✅ is_container_first_strategy property
+✅ get_container_packages
+✅ get_missing_packages
+❌ DriverAlignment validation: Validation failed: ['Some container packages missing: missing']
+✅ to_dict serialization
+✅ from_dict deserialization
+
+📋 AlignmentRequest:
+✅ AlignmentRequest creation
+✅ AlignmentRequest validation
+✅ Architecture normalization (arm64)
+✅ Architecture normalization (amd64 -> x86_64)
+✅ get_architecture_enum
+✅ AlignmentRequest invalid validation
+
+📋 NodeGroupConfig Basic:
+✅ NodeGroupConfig creation
+✅ NodeGroupConfig basic validation
+✅ set_gpu_defaults ARM64
+✅ set_ami_configuration
+✅ to_aws_cli_format
+✅ to_json serialization
+
+📋 NodeGroupConfigBuilder:
+✅ NodeGroupConfigBuilder creation
+✅ NodeGroupConfigBuilder validation
+✅ NodeGroupConfigBuilder configuration
+
+📋 Template Operations:
+✅ from_template_file
+✅ merge_overrides
+
+📋 Nested Config Objects:
+✅ ScalingConfig validation
+✅ ScalingConfig invalid validation
+✅ UpdateConfig
+✅ Taint validation
+✅ Taint to_dict
+
+============================================================
+TEST SUMMARY: 30/31 passed
+FAILED TESTS:
+  • DriverAlignment validation: Validation failed: ['Some container packages missing: missing']
+============================================================
+💥 Some Phase 2 tests failed!
+
+❌ PHASE 2 MODELS TESTS FAILED (0.1s)
+
+============================================================
+🧪 RUNNING PHASE 3 UTILITIES TESTS
+============================================================
+🧪 TESTING PHASE 3 UTILITIES
+============================================================
+
+📋 Version Parser:
+✅ Basic version parsing
+✅ Version with suffix parsing
+❌ Driver version parsing: Got 570.148.8
+❌ Clean version extraction: Expected '570.148.08', got '570.148.8'
+❌ Legacy parse_driver_version function: Got '570.148.8'
+
+📋 Version Comparison:
+✅ VersionInfo greater than
+✅ VersionInfo equality
+✅ String version comparison
+✅ Version sorting
+✅ Legacy compare_versions function
+✅ Version compatibility check
+✅ Find latest version
+
+📋 Kubernetes Version Utils:
+✅ K8s supported version check
+✅ K8s EOL version check
+✅ K8s latest version
+✅ K8s version validation (valid)
+✅ K8s version validation (invalid)
+
+📋 Architecture Manager:
+✅ Architecture info retrieval
+✅ ARM64 architecture info
+✅ Instance type architecture detection (ARM64)
+✅ Instance type architecture detection (x86_64)
+✅ Instance type validation (compatible)
+✅ Instance type validation (incompatible)
+✅ GPU instance recommendations
+✅ NVIDIA repository config (ARM64)
+✅ Container platform string
+✅ Architecture labels
+✅ Legacy get_ami_types_for_architecture
+✅ Legacy get_nvidia_repo_path
+✅ Legacy normalize_architecture
+
+📋 Instance Type Analyzer:
+✅ Instance type analysis (g5g.xlarge)
+✅ Instance type analysis (g5.xlarge)
+✅ Invalid instance type analysis
+✅ Instance type recommendations
+
+📋 Template Validator:
+✅ Template validation (valid)
+✅ Template validation (invalid)
+✅ Template validation (wrong types)
+✅ Legacy validate_template function
+
+📋 Template Merger:
+✅ Template merge (simple override)
+✅ Template merge (deep merge labels)
+✅ Architecture-specific overrides
+✅ Legacy merge_template_overrides function
+
+📋 Template Loader:
+✅ Template loading
+✅ Validate and load template
+✅ Legacy load_template function
+✅ Create default template
+✅ Load non-existent template (error handling)
+
+📋 Template Generator:
+✅ Workload-specific template (ml-training)
+✅ Workload-specific template (ml-inference)
+❌ Template generator tests: Error creating template file : [Errno 2] No such file or directory: ''
+
+📋 Mixed Architecture Analysis:
+✅ Mixed architecture analysis
+✅ Single architecture analysis
+✅ Architecture mismatch detection
+
+============================================================
+TEST SUMMARY: 49/53 passed
+FAILED TESTS:
+  • Driver version parsing: Got 570.148.8
+  • Clean version extraction: Expected '570.148.08', got '570.148.8'
+  • Legacy parse_driver_version function: Got '570.148.8'
+  • Template generator tests: Error creating template file : [Errno 2] No such file or directory: ''
+============================================================
+💥 Some Phase 3 tests failed!
+
+❌ PHASE 3 UTILITIES TESTS FAILED (0.1s)
+
+============================================================
+🧪 RUNNING INTEGRATION TESTS
+============================================================
+✅ All module imports successful!
+🧪 INTEGRATION TESTING - PHASES 1, 2, 3
+============================================================
+Testing how all refactored modules work together...
+
+🔗 AMI-First Workflow:
+🔄 Testing AMI-first workflow integration...
+✅ AlignmentRequest validation
+✅ Architecture information retrieval
+✅ Kubernetes version validation
+✅ AMI type recommendation
+✅ DriverAlignment creation and validation
+✅ NodeGroup configuration generation
+✅ Architecture consistency verification
+✅ AWS CLI format generation
+📋 Generated configuration preview:
+   Cluster: test-cluster
+   Nodegroup: gpu-workers-arm64
+   AMI Type: AL2023_ARM_64_NVIDIA
+   Instance Types: ['g5g.xlarge']
+   Architecture: arm64
+
+🔗 Container-First Workflow:
+🔄 Testing container-first workflow integration...
+❌ Driver version parsing: Expected 570.148.08, got 570.148.8
+
+🔗 Template Integration:
+🔄 Testing template integration...
+✅ Workload template generation
+✅ Template to NodeGroupConfig conversion
+✅ Template override merging
+✅ Template file save/load cycle
+❌ Template integration: Error creating template file : [Errno 2] No such file or directory: ''
+
+🔗 Cross-Module Compatibility:
+🔄 Testing cross-module compatibility...
+✅ AMI type consistency (x86_64)
+✅ AMI type consistency (arm64)
+✅ Version parsing round-trip (570.148.08-1.amzn2023)
+✅ Version parsing round-trip (560.35.05-1.ubuntu2204)
+✅ Version parsing round-trip (1.32.0)
+✅ Version parsing round-trip (1.31)
+✅ Architecture normalization consistency (amd64)
+✅ Architecture normalization consistency (x86_64)
+✅ Architecture normalization consistency (arm64)
+✅ Config serialization round-trip
+✅ Validation format consistency (DriverAlignment)
+✅ Validation format consistency (AlignmentRequest)
+✅ Validation format consistency (NodeGroupConfig)
+📋 Cross-module compatibility verified:
+   AMI type enums consistent across modules
+   Version parsing round-trips work
+   Architecture normalization consistent
+   Configuration serialization reliable
+   Error handling formats uniform
+
+🔗 Backward Compatibility:
+🔄 Testing backward compatibility...
+❌ Legacy parse_driver_version: Got 570.148.8
+✅ Legacy compare_versions
+✅ Legacy sort_versions
+✅ Legacy get_ami_types_for_architecture
+✅ Legacy get_nvidia_repo_path
+✅ Legacy normalize_architecture
+✅ Legacy validate_template
+✅ Legacy merge_template_overrides
+📋 Backward compatibility verified:
+   All legacy functions work as expected
+   API interfaces preserved
+   Original behavior maintained
+
+============================================================
+INTEGRATION TEST SUMMARY: 32/35 passed
+FAILED TESTS:
+  • Driver version parsing: Expected 570.148.08, got 570.148.8
+  • Template integration: Error creating template file : [Errno 2] No such file or directory: ''
+  • Legacy parse_driver_version: Got 570.148.8
+============================================================
+
+💥 SOME INTEGRATION TESTS FAILED!
+❌ Fix these issues before proceeding to Phase 4
+
+❌ INTEGRATION TESTS FAILED (0.2s)
+
+============================================================
+📊 FINAL TEST SUMMARY
+============================================================
+❌ PHASE 2 MODELS TESTS
+❌ PHASE 3 UTILITIES TESTS
+❌ INTEGRATION TESTS
+
+RESULTS: 0/3 test suites passed
+DURATION: 0.3 seconds
+
+💥 3 TEST SUITE(S) FAILED!
+❌ Fix the failing tests before proceeding
+
+Debugging tips:
+1. Check import paths and module structure
+2. Verify all required dependencies are available
+3. Run individual test scripts for detailed error messages
+4. Check Python path and module visibility

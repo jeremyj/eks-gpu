@@ -1,419 +1,138 @@
 #!/usr/bin/env python3
 """
-Enhanced EKS AMI Release Parser
+Enhanced EKS AMI Release Parser - Refactored Version
 
-Fixed version that properly handles both AL2 and AL2023 AMI types
-for both x86_64 and ARM64 architectures with improved driver version matching.
+This is the refactored version using the new modular architecture.
+The original eks_ami_parser.py functionality is preserved while using
+the new core modules for better maintainability.
 """
 
-import requests
-import re
-import sys
 import argparse
-from bs4 import BeautifulSoup
-from typing import Optional, Dict, List, Tuple
-import json
+import sys
+from typing import Optional
+
+# Import the new modular components
+from core.ami_resolver import EKSAMIResolver, AMIResolutionError
+from models.ami_types import AMIType, Architecture, AMITypeManager
 
 
-class EKSAMIParser:
+class EKSAMIParserCLI:
+    """Command-line interface for the EKS AMI parser using the new modular architecture."""
+    
     def __init__(self, verbose: bool = False):
-        self.api_url = "https://api.github.com/repos/awslabs/amazon-eks-ami/releases"
-        self.session = requests.Session()
-        self.verbose = verbose
-        # Add headers to avoid rate limiting
-        self.session.headers.update({
-            'User-Agent': 'EKS-AMI-Parser/1.0',
-            'Accept': 'application/vnd.github.v3+json'
-        })
-
-    def log(self, message: str):
-        """Print verbose logging messages."""
-        if self.verbose:
-            print(f"[DEBUG] {message}")
-
-    def get_releases(self, limit: int = 50) -> List[Dict]:
-        """Fetch releases from the GitHub API."""
-        try:
-            params = {'per_page': limit}
-            response = self.session.get(self.api_url, params=params)
-            response.raise_for_status()
-            releases = response.json()
-            self.log(f"Fetched {len(releases)} releases")
-            return releases
-        except requests.exceptions.RequestException as e:
-            print(f"Error fetching releases: {e}")
-            sys.exit(1)
-
-    def parse_release_body(self, body: str, release_tag: str) -> Dict:
-        """Parse the release body HTML to extract package information."""
-        if not body:
-            self.log(f"Empty body for release {release_tag}")
-            return {}
-        
-        self.log(f"Parsing release body for {release_tag}")
-        soup = BeautifulSoup(body, 'html.parser')
-        
-        # Find all Kubernetes version sections
-        k8s_sections = {}
-        
-        # Method 1: Look for <summary> tags with Kubernetes versions
-        for summary in soup.find_all('summary'):
-            if summary.find('b'):
-                b_tag = summary.find('b')
-                version_text = b_tag.get_text().strip()
-                self.log(f"Found summary with text: {version_text}")
-                
-                # Extract version number (e.g., "1.32" from "Kubernetes 1.32")
-                version_match = re.search(r'Kubernetes\s+([\d.]+)', version_text)
-                if version_match:
-                    k8s_version = version_match.group(1)
-                    self.log(f"Found Kubernetes version: {k8s_version}")
-                    
-                    # Find the parent details element
-                    details = summary.find_parent('details')
-                    if details:
-                        packages = self._parse_k8s_section(details, k8s_version)
-                        if packages:
-                            k8s_sections[k8s_version] = packages
-        
-        # Method 2: Look for headers with Kubernetes versions (fallback)
-        if not k8s_sections:
-            headers = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
-            for header in headers:
-                header_text = header.get_text().strip()
-                version_match = re.search(r'Kubernetes\s+([\d.]+)', header_text)
-                if version_match:
-                    k8s_version = version_match.group(1)
-                    self.log(f"Found Kubernetes version in header: {k8s_version}")
-                    
-                    # Find tables after this header
-                    packages = self._find_packages_after_header(header, k8s_version)
-                    if packages:
-                        k8s_sections[k8s_version] = packages
-        
-        self.log(f"Found {len(k8s_sections)} Kubernetes sections")
-        return k8s_sections
-
-    def _parse_k8s_section(self, details_element, k8s_version: str) -> Dict:
-        """Parse a Kubernetes version section to extract package tables."""
-        tables = details_element.find_all('table')
-        self.log(f"Found {len(tables)} tables in K8s {k8s_version} section")
-        
-        # Initialize packages dict
-        packages = {}
-        
-        # Look for tables with NVIDIA GPU AMI columns (including ARM64)
-        for i, table in enumerate(tables):
-            headers = [th.get_text().strip() for th in table.find_all('th')]
-            self.log(f"Table {i} headers: {headers}")
-            
-            # Check for both AL2023 and AL2 GPU AMI types across architectures
-            gpu_columns = {}
-            for idx, header in enumerate(headers):
-                if header in ['AL2023_x86_64_NVIDIA', 'AL2_x86_64_GPU', 'AL2023_ARM_64_NVIDIA']:
-                    gpu_columns[header] = idx
-                    self.log(f"Found GPU column: {header} at index {idx}")
-            
-            if gpu_columns:
-                table_packages = self._parse_package_table(table, headers, k8s_version, gpu_columns)
-                packages.update(table_packages)
-        
-        return packages
-
-    def _find_packages_after_header(self, header, k8s_version: str) -> Dict:
-        """Find package tables after a Kubernetes version header."""
-        packages = {}
-        
-        # Find all tables after this header
-        current = header.find_next_sibling()
-        while current:
-            if current.name == 'table':
-                headers = [th.get_text().strip() for th in current.find_all('th')]
-                
-                # Check for GPU columns (including ARM64)
-                gpu_columns = {}
-                for idx, h in enumerate(headers):
-                    if h in ['AL2023_x86_64_NVIDIA', 'AL2_x86_64_GPU', 'AL2023_ARM_64_NVIDIA']:
-                        gpu_columns[h] = idx
-                
-                if gpu_columns:
-                    self.log(f"Found GPU table after header for K8s {k8s_version}")
-                    table_packages = self._parse_package_table(current, headers, k8s_version, gpu_columns)
-                    packages.update(table_packages)
-                    
-            elif current.name in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
-                # Stop if we hit another header
-                break
-            current = current.find_next_sibling()
-        
-        return packages
-
-    def _parse_package_table(self, table, headers: List[str], k8s_version: str, gpu_columns: Dict[str, int]) -> Dict:
-        """Parse a package table to extract package versions from GPU columns."""
-        packages = {}
-        
-        # Parse each row
-        rows = table.find_all('tr')[1:]  # Skip header row
-        self.log(f"Processing {len(rows)} rows for GPU columns: {list(gpu_columns.keys())}")
-        self.log(f"Headers: {headers}")
-        
-        for row_idx, row in enumerate(rows):
-            cells = row.find_all(['td', 'th'])
-            if len(cells) == 0:
-                continue
-                
-            package_name = cells[0].get_text().strip()
-            self.log(f"Row {row_idx}: Processing package '{package_name}' with {len(cells)} cells")
-            
-            # Debug: show all cell values and their colspan
-            cell_info = []
-            for i, cell in enumerate(cells):
-                colspan = int(cell.get('colspan', 1))
-                value = cell.get_text().strip()
-                cell_info.append(f"[{i}]:{value}(span:{colspan})")
-            self.log(f"  Cell details: {' '.join(cell_info)}")
-            
-            # Check each GPU column type
-            for column_name, target_col_idx in gpu_columns.items():
-                self.log(f"  Looking for column {column_name} at logical index {target_col_idx}")
-                
-                # Map logical column index to actual cell index considering colspan
-                current_logical_col = 0
-                cell_value = None
-                
-                for cell_idx, cell in enumerate(cells):
-                    colspan = int(cell.get('colspan', 1))
-                    self.log(f"    Cell {cell_idx}: logical_cols {current_logical_col}-{current_logical_col + colspan - 1}")
-                    
-                    # Check if target column falls within this cell's span
-                    if current_logical_col <= target_col_idx < current_logical_col + colspan:
-                        cell_value = cell.get_text().strip()
-                        self.log(f"    ✅ FOUND in cell {cell_idx}: '{cell_value}'")
-                        break
-                    
-                    current_logical_col += colspan
-                
-                if cell_value and cell_value not in ['—', '-', '']:
-                    # Store with AMI type prefix to distinguish between AL2, AL2023, and architectures
-                    key = f"{package_name}_{column_name}"
-                    packages[key] = cell_value
-                    self.log(f"  ✅ STORED: {key} = {cell_value}")
-                    
-                    # Also store without prefix for backward compatibility
-                    if package_name == 'kmod-nvidia-latest-dkms':
-                        packages[package_name] = cell_value
-                        self.log(f"  ✅ STORED (compat): {package_name} = {cell_value}")
-                else:
-                    self.log(f"  ❌ NOT FOUND or empty value for column {column_name}")
-        
-        self.log(f"Extracted {len(packages)} packages for K8s {k8s_version}")
-        return packages
-
-    def get_ami_types_for_architecture(self, architecture: str) -> List[str]:
-        """Get AMI types for a specific architecture."""
-        if architecture.lower() == "arm64":
-            return ["AL2023_ARM_64_NVIDIA"]
-        elif architecture.lower() == "x86_64" or architecture.lower() == "amd64":
-            return ["AL2023_x86_64_NVIDIA", "AL2_x86_64_GPU"]
-        else:
-            # Default to both x86_64 types for backward compatibility
-            return ["AL2023_x86_64_NVIDIA", "AL2_x86_64_GPU"]
-
-    def find_kmod_nvidia_version(self, k8s_version: str, ami_type: str = "AL2023_x86_64_NVIDIA") -> Optional[Tuple[str, str, str]]:
-        """Find the first kmod-nvidia-latest-dkms version for the specified Kubernetes version and AMI type."""
-        releases = self.get_releases()
-        
-        for release in releases:
-            if release.get('draft', False) or release.get('prerelease', False):
-                continue
-                
-            release_tag = release.get('tag_name', '')
-            release_date = release.get('published_at', '')
-            body = release.get('body', '')
-            
-            self.log(f"Processing release: {release_tag}")
-            
-            # Parse the release body
-            k8s_sections = self.parse_release_body(body, release_tag)
-            
-            # Look for the specified Kubernetes version
-            for version, packages in k8s_sections.items():
-                if version == k8s_version:
-                    # Try different package key formats
-                    kmod_version = None
-                    
-                    # Try with AMI type suffix
-                    key_with_type = f"kmod-nvidia-latest-dkms_{ami_type}"
-                    if key_with_type in packages:
-                        kmod_version = packages[key_with_type]
-                    # Try without suffix (backward compatibility)
-                    elif "kmod-nvidia-latest-dkms" in packages:
-                        kmod_version = packages["kmod-nvidia-latest-dkms"]
-                    
-                    if kmod_version:
-                        return (release_tag, release_date, kmod_version)
-        
-        return None
-
-    def find_latest_release_for_k8s(self, k8s_version: str, ami_type: str = "AL2023_x86_64_NVIDIA") -> Optional[Tuple[str, str, str]]:
-        """Find the latest (most recent) release for the specified Kubernetes version and AMI type."""
-        releases = self.get_releases()
-        
-        # Releases are typically ordered by date (newest first)
-        for release in releases:
-            if release.get('draft', False) or release.get('prerelease', False):
-                continue
-                
-            release_tag = release.get('tag_name', '')
-            release_date = release.get('published_at', '')
-            body = release.get('body', '')
-            
-            self.log(f"Processing release: {release_tag}")
-            
-            # Parse the release body
-            k8s_sections = self.parse_release_body(body, release_tag)
-            
-            # Look for the specified Kubernetes version
-            for version, packages in k8s_sections.items():
-                if version == k8s_version:
-                    # Try different package key formats
-                    kmod_version = "Not found"
-                    
-                    # Try with AMI type suffix
-                    key_with_type = f"kmod-nvidia-latest-dkms_{ami_type}"
-                    if key_with_type in packages:
-                        kmod_version = packages[key_with_type]
-                    # Try without suffix (backward compatibility)
-                    elif "kmod-nvidia-latest-dkms" in packages:
-                        kmod_version = packages["kmod-nvidia-latest-dkms"]
-                    
-                    return (release_tag, release_date, kmod_version)
-        
-        return None
-
-    def find_releases_by_driver_version(self, driver_version: str, fuzzy: bool = False, 
-                                       k8s_version: Optional[str] = None, 
-                                       ami_types: List[str] = None,
-                                       architecture: str = "x86_64") -> List[Tuple[str, str, str, str, str]]:
         """
-        Find releases that contain the specified driver version.
+        Initialize the CLI with the new resolver.
         
         Args:
-            driver_version: The driver version to search for (e.g., "550.127.08")
-            fuzzy: Whether to use fuzzy matching
-            k8s_version: Optional Kubernetes version filter
-            ami_types: List of AMI types to search (default: arch-specific types)
-            architecture: Target architecture (x86_64, arm64)
-            
-        Returns:
-            List of tuples: (release_tag, release_date, k8s_version, kmod_version, ami_type)
+            verbose: Enable verbose logging
         """
-        if ami_types is None:
-            ami_types = self.get_ami_types_for_architecture(architecture)
+        self.verbose = verbose
+        self.resolver = EKSAMIResolver(verbose=verbose)
+        self.ami_manager = AMITypeManager()
+    
+    def find_kmod_nvidia_version(self, k8s_version: str, ami_type_str: str = "AL2023_x86_64_NVIDIA") -> Optional[tuple]:
+        """Find the first kmod-nvidia-latest-dkms version for the specified Kubernetes version and AMI type."""
+        try:
+            ami_type = AMIType(ami_type_str)
+            return self.resolver.find_kmod_nvidia_version(k8s_version, ami_type)
+        except (ValueError, AMIResolutionError) as e:
+            if self.verbose:
+                print(f"Error: {e}")
+            return None
+    
+    def find_latest_release_for_k8s(self, k8s_version: str, ami_type_str: str = "AL2023_x86_64_NVIDIA") -> Optional[tuple]:
+        """Find the latest (most recent) release for the specified Kubernetes version and AMI type."""
+        try:
+            ami_type = AMIType(ami_type_str)
+            return self.resolver.find_latest_release_for_k8s(k8s_version, ami_type)
+        except (ValueError, AMIResolutionError) as e:
+            if self.verbose:
+                print(f"Error: {e}")
+            return None
+    
+    def find_releases_by_driver_version(self, driver_version: str, fuzzy: bool = False, 
+                                       k8s_version: Optional[str] = None, 
+                                       ami_types: list = None,
+                                       architecture: str = "x86_64") -> list:
+        """Find releases that contain the specified driver version."""
+        try:
+            arch = Architecture.from_string(architecture)
             
-        releases = self.get_releases()
-        matches = []
-        
-        for release in releases:
-            if release.get('draft', False) or release.get('prerelease', False):
-                continue
-                
-            release_tag = release.get('tag_name', '')
-            release_date = release.get('published_at', '')
-            body = release.get('body', '')
+            # Convert AMI type strings to AMIType objects
+            ami_type_objects = None
+            if ami_types:
+                ami_type_objects = [AMIType(ami_type) for ami_type in ami_types]
             
-            self.log(f"Processing release: {release_tag}")
-            
-            # Parse the release body
-            k8s_sections = self.parse_release_body(body, release_tag)
-            
-            # Check each Kubernetes version in this release
-            for k8s_ver, packages in k8s_sections.items():
-                # Filter by Kubernetes version if specified
-                if k8s_version and k8s_ver != k8s_version:
-                    continue
-                
-                # Check each AMI type
-                for ami_type in ami_types:
-                    key_with_type = f"kmod-nvidia-latest-dkms_{ami_type}"
-                    kmod_version = packages.get(key_with_type)
-                    
-                    # Also check without suffix for backward compatibility
-                    if not kmod_version:
-                        kmod_version = packages.get("kmod-nvidia-latest-dkms")
-                    
-                    if kmod_version:
-                        # Check for exact or fuzzy match
-                        version_matched = False
-                        if fuzzy:
-                            if driver_version.lower() in kmod_version.lower():
-                                version_matched = True
-                        else:
-                            if driver_version in kmod_version:
-                                version_matched = True
-                        
-                        if version_matched:
-                            matches.append((release_tag, release_date, k8s_ver, kmod_version, ami_type))
-                            self.log(f"Found match: {release_tag} K8s {k8s_ver} {ami_type} {kmod_version}")
-        
-        return matches
-
-    def list_available_k8s_versions(self) -> List[str]:
+            return self.resolver.find_releases_by_driver_version(
+                driver_version, fuzzy, k8s_version, ami_type_objects, arch
+            )
+        except (ValueError, AMIResolutionError) as e:
+            if self.verbose:
+                print(f"Error: {e}")
+            return []
+    
+    def list_available_k8s_versions(self) -> list:
         """List all available Kubernetes versions from recent releases."""
-        releases = self.get_releases(limit=20)  # Check last 20 releases
-        k8s_versions = set()
-        
-        for release in releases:
-            if release.get('draft', False) or release.get('prerelease', False):
-                continue
-                
-            release_tag = release.get('tag_name', '')
-            body = release.get('body', '')
-            
-            if not body:
-                continue
-            
-            k8s_sections = self.parse_release_body(body, release_tag)
-            k8s_versions.update(k8s_sections.keys())
-        
-        return sorted(k8s_versions, key=lambda x: [int(i) for i in x.split('.')])
-
+        try:
+            return self.resolver.list_available_k8s_versions()
+        except AMIResolutionError as e:
+            if self.verbose:
+                print(f"Error: {e}")
+            return []
+    
     def debug_release(self, release_tag: str):
         """Debug a specific release to see its structure."""
-        releases = self.get_releases()
-        
-        for release in releases:
-            if release.get('tag_name', '') == release_tag:
-                print(f"Release: {release_tag}")
-                print(f"Draft: {release.get('draft', False)}")
-                print(f"Prerelease: {release.get('prerelease', False)}")
-                print(f"Published: {release.get('published_at', '')}")
+        try:
+            debug_info = self.resolver.debug_release(release_tag)
+            
+            print(f"Release: {release_tag}")
+            release_info = debug_info['release_info']
+            print(f"Draft: {release_info['draft']}")
+            print(f"Prerelease: {release_info['prerelease']}")
+            print(f"Published: {release_info['published_at']}")
+            print("=" * 80)
+            
+            body = release_info['body']
+            if body:
+                print("Body preview (first 500 chars):")
+                print(body[:500])
                 print("=" * 80)
                 
-                body = release.get('body', '')
-                if body:
-                    print("Body preview (first 500 chars):")
-                    print(body[:500])
-                    print("=" * 80)
+                k8s_sections = debug_info['k8s_sections']
+                print(f"Found {len(k8s_sections)} Kubernetes sections:")
+                
+                for k8s_version, section_data in k8s_sections.items():
+                    packages = {k: v for k, v in section_data.items() if k != 'driver_versions'}
+                    print(f"  K8s {k8s_version}: {len(packages)} packages")
                     
-                    k8s_sections = self.parse_release_body(body, release_tag)
-                    print(f"Found {len(k8s_sections)} Kubernetes sections:")
-                    for k8s_version, packages in k8s_sections.items():
-                        print(f"  K8s {k8s_version}: {len(packages)} packages")
-                        for pkg, version in packages.items():
-                            if 'nvidia' in pkg.lower():
-                                print(f"    {pkg}: {version}")
-                        print()
-                else:
-                    print("No body content found")
-                return
-        
-        print(f"Release {release_tag} not found")
+                    # Show NVIDIA packages
+                    for pkg, version in packages.items():
+                        if 'nvidia' in pkg.lower():
+                            print(f"    {pkg}: {version}")
+                    
+                    # Show driver versions summary
+                    if 'driver_versions' in section_data:
+                        driver_versions = section_data['driver_versions']
+                        if driver_versions:
+                            print(f"    Driver versions: {driver_versions}")
+                    print()
+                
+                # Show any parsing errors
+                if debug_info['parsing_errors']:
+                    print("Parsing errors:")
+                    for error in debug_info['parsing_errors']:
+                        print(f"  - {error}")
+            else:
+                print("No body content found")
+                
+        except AMIResolutionError as e:
+            print(f"Error debugging release {release_tag}: {e}")
 
 
 def main():
+    """Main function preserving the original CLI interface."""
     parser = argparse.ArgumentParser(
-        description='Find kmod-nvidia-latest-dkms version for EKS AMI types across architectures'
+        description='Find kmod-nvidia-latest-dkms version for EKS AMI types across architectures (Refactored)'
     )
     parser.add_argument(
         '--k8s-version', '-k',
@@ -462,42 +181,57 @@ def main():
     
     args = parser.parse_args()
     
-    eks_parser = EKSAMIParser(verbose=args.verbose)
+    # Initialize the CLI with the new architecture
+    cli = EKSAMIParserCLI(verbose=args.verbose)
+    ami_manager = AMITypeManager()
     
     if args.debug_release:
-        eks_parser.debug_release(args.debug_release)
+        cli.debug_release(args.debug_release)
         return
     
     if args.list_versions:
         print("Available Kubernetes versions:")
-        versions = eks_parser.list_available_k8s_versions()
+        versions = cli.list_available_k8s_versions()
         for version in versions:
             print(f"  - {version}")
         return
     
+    # Normalize architecture
+    architecture = args.architecture
+    if architecture == "amd64":
+        architecture = "x86_64"
+    
     # Determine AMI types to search based on architecture
     if args.ami_type == 'both':
-        ami_types = eks_parser.get_ami_types_for_architecture(args.architecture)
+        ami_types = ami_manager.get_ami_types_for_architecture(Architecture.from_string(architecture))
+        ami_type_strings = [ami_type.value for ami_type in ami_types]
     else:
-        ami_types = [args.ami_type]
+        ami_type_strings = [args.ami_type]
         
         # Validate AMI type matches architecture
-        arch_ami_types = eks_parser.get_ami_types_for_architecture(args.architecture)
-        if args.ami_type not in arch_ami_types:
-            print(f"⚠️  Warning: AMI type {args.ami_type} may not be compatible with architecture {args.architecture}")
-            print(f"   Compatible AMI types for {args.architecture}: {', '.join(arch_ami_types)}")
+        try:
+            arch = Architecture.from_string(architecture)
+            compatible_types = ami_manager.get_ami_types_for_architecture(arch)
+            compatible_strings = [ami_type.value for ami_type in compatible_types]
+            
+            if args.ami_type not in compatible_strings:
+                print(f"⚠️  Warning: AMI type {args.ami_type} may not be compatible with architecture {architecture}")
+                print(f"   Compatible AMI types for {architecture}: {', '.join(compatible_strings)}")
+        except ValueError as e:
+            print(f"Error: {e}")
+            return
     
     # Search by driver version (with optional K8s version filter)
     if args.driver_version:
         filter_text = f" for Kubernetes {args.k8s_version}" if args.k8s_version else ""
-        arch_text = f" ({args.architecture})" if args.architecture != "x86_64" else ""
+        arch_text = f" ({architecture})" if architecture != "x86_64" else ""
         print(f"Searching for releases with kmod-nvidia-latest-dkms version: {args.driver_version}{filter_text}{arch_text}")
         if args.fuzzy:
             print("(Using fuzzy matching)")
         print("=" * 80)
         
-        matches = eks_parser.find_releases_by_driver_version(
-            args.driver_version, args.fuzzy, args.k8s_version, ami_types, args.architecture
+        matches = cli.find_releases_by_driver_version(
+            args.driver_version, args.fuzzy, args.k8s_version, ami_type_strings, architecture
         )
         
         if matches:
@@ -513,10 +247,10 @@ def main():
                 print("-" * 40)
         else:
             filter_text = f" for Kubernetes {args.k8s_version}" if args.k8s_version else ""
-            arch_text = f" on {args.architecture}" if args.architecture != "x86_64" else ""
+            arch_text = f" on {architecture}" if architecture != "x86_64" else ""
             print(f"No releases found with driver version: {args.driver_version}{filter_text}{arch_text}")
             
-            if args.architecture == "arm64":
+            if architecture == "arm64":
                 print(f"\n💡 ARM64 AMIs may have different driver availability than x86_64")
                 print(f"   Try searching x86_64 to see if the driver exists: --architecture x86_64")
         return
@@ -530,40 +264,45 @@ def main():
         return
     
     # Try all specified AMI types for K8s version search
-    for ami_type in ami_types:
-        arch_name = "ARM64" if "ARM" in ami_type else "x86_64"
-        print(f"\n--- Searching {ami_type} ({arch_name}) ---")
+    for ami_type_str in ami_type_strings:
+        try:
+            ami_type = AMIType(ami_type_str)
+            arch_name = ami_type.architecture.display_name
+            print(f"\n--- Searching {ami_type_str} ({arch_name}) ---")
+            
+            if args.latest:
+                print(f"Finding latest release for Kubernetes {args.k8s_version}")
+                print("=" * 80)
+                
+                result = cli.find_latest_release_for_k8s(args.k8s_version, ami_type_str)
+                
+                if result:
+                    release_tag, release_date, kmod_version = result
+                    print(f"Latest release: {release_tag}")
+                    print(f"Release date: {release_date}")
+                    print(f"AMI type: {ami_type_str}")
+                    print(f"Architecture: {arch_name}")
+                    print(f"kmod-nvidia-latest-dkms version: {kmod_version}")
+                else:
+                    print(f"No releases found for Kubernetes {args.k8s_version} with {ami_type_str}")
+            else:
+                print(f"Searching for first kmod-nvidia-latest-dkms version for Kubernetes {args.k8s_version}")
+                print("=" * 80)
+                
+                result = cli.find_kmod_nvidia_version(args.k8s_version, ami_type_str)
+                
+                if result:
+                    release_tag, release_date, kmod_version = result
+                    print(f"Found in release: {release_tag}")
+                    print(f"Release date: {release_date}")
+                    print(f"AMI type: {ami_type_str}")
+                    print(f"Architecture: {arch_name}")
+                    print(f"kmod-nvidia-latest-dkms version: {kmod_version}")
+                else:
+                    print(f"No kmod-nvidia-latest-dkms version found for Kubernetes {args.k8s_version} with {ami_type_str}")
         
-        if args.latest:
-            print(f"Finding latest release for Kubernetes {args.k8s_version}")
-            print("=" * 80)
-            
-            result = eks_parser.find_latest_release_for_k8s(args.k8s_version, ami_type)
-            
-            if result:
-                release_tag, release_date, kmod_version = result
-                print(f"Latest release: {release_tag}")
-                print(f"Release date: {release_date}")
-                print(f"AMI type: {ami_type}")
-                print(f"Architecture: {arch_name}")
-                print(f"kmod-nvidia-latest-dkms version: {kmod_version}")
-            else:
-                print(f"No releases found for Kubernetes {args.k8s_version} with {ami_type}")
-        else:
-            print(f"Searching for first kmod-nvidia-latest-dkms version for Kubernetes {args.k8s_version}")
-            print("=" * 80)
-            
-            result = eks_parser.find_kmod_nvidia_version(args.k8s_version, ami_type)
-            
-            if result:
-                release_tag, release_date, kmod_version = result
-                print(f"Found in release: {release_tag}")
-                print(f"Release date: {release_date}")
-                print(f"AMI type: {ami_type}")
-                print(f"Architecture: {arch_name}")
-                print(f"kmod-nvidia-latest-dkms version: {kmod_version}")
-            else:
-                print(f"No kmod-nvidia-latest-dkms version found for Kubernetes {args.k8s_version} with {ami_type}")
+        except ValueError as e:
+            print(f"Error with AMI type {ami_type_str}: {e}")
 
 
 if __name__ == "__main__":

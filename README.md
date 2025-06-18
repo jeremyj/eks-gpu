@@ -1,49 +1,75 @@
-# EKS NVIDIA Driver Alignment Toolkit
+# EKS NVIDIA Tools - Unified CLI for EKS AMI and NVIDIA Driver Management
 
-A comprehensive toolkit for aligning NVIDIA drivers between Amazon EKS nodegroup AMIs and container images. This toolkit helps ensure compatibility between GPU drivers on EKS worker nodes and containerized GPU workloads.
+A comprehensive toolkit for managing NVIDIA drivers between Amazon EKS nodegroup AMIs and container images across both x86_64 and ARM64 architectures. This unified CLI provides a modern, modular interface for aligning GPU drivers, parsing AMI releases, and generating nodegroup templates.
+
+## 🚀 Quick Start
+
+```bash
+# Install dependencies
+pip install beautifulsoup4 tabulate pyyaml requests
+
+# Check version and capabilities
+python -m eks_nvidia_tools.cli.main version --verbose
+
+# Parse AMI releases for driver information
+python -m eks_nvidia_tools.cli.main parse --k8s-version 1.32 --architecture arm64
+
+# Align drivers between AMI and containers
+python -m eks_nvidia_tools.cli.main align --strategy ami-first --cluster-name my-cluster
+
+# Generate nodegroup templates
+python -m eks_nvidia_tools.cli.main template --generate --workload ml-training --architecture arm64
+```
+
+## 📋 Table of Contents
+
+- [Overview](#overview)
+- [Installation](#installation)
+- [Unified CLI Commands](#unified-cli-commands)
+- [Command Reference](#command-reference)
+- [Architecture Support](#architecture-support)
+- [Driver Alignment Strategies](#driver-alignment-strategies)
+- [Template Management](#template-management)
+- [Comprehensive Examples](#comprehensive-examples)
+- [Migration Guide](#migration-guide)
+- [Troubleshooting](#troubleshooting)
+- [Legacy Compatibility](#legacy-compatibility)
 
 ## Overview
 
-Managing NVIDIA drivers in Kubernetes environments can be challenging, especially when trying to maintain compatibility between:
-- EKS nodegroup AMI driver versions (kmod-nvidia-latest-dkms)
-- Container image driver versions (libnvidia-compute, libnvidia-encode, libnvidia-decode)
+Managing NVIDIA drivers in Kubernetes environments requires careful coordination between:
+- **EKS nodegroup AMI driver versions** (kmod-nvidia-latest-dkms)
+- **Container image driver versions** (libnvidia-compute, libnvidia-encode, libnvidia-decode)
+- **Architecture differences** between x86_64 and ARM64 (Graviton)
 
-This toolkit provides two strategic approaches to solve this alignment problem:
+### Key Features
 
-### 🚀 **AMI-First Strategy**
-Use the latest EKS AMI and update container drivers to match
-- ✅ Always uses latest, supported AMI releases
-- ✅ Ensures security patches and optimizations
-- ⚙️ Requires updating container images
+- 🎯 **Unified CLI Interface** - Single `eks-nvidia-tools` command with intuitive subcommands
+- 🏗️ **Multi-Architecture Support** - Full x86_64 and ARM64 (Graviton) compatibility
+- 📊 **Multiple Output Formats** - Table, JSON, and YAML output for automation
+- 🔄 **Driver Alignment Strategies** - AMI-first and container-first approaches
+- 📝 **Template Management** - Generate, validate, and merge nodegroup templates
+- 🔍 **Comprehensive Validation** - Input validation with helpful error messages
+- 📈 **Progress Indicators** - Real-time feedback during operations
+- 🔙 **Backward Compatibility** - Legacy script support with deprecation warnings
 
-### 🐳 **Container-First Strategy**  
-Keep existing container drivers and find compatible AMI
-- ✅ No container image changes required
-- ✅ Useful for legacy applications
-- ⚠️ May use older AMI releases
+## Installation
 
-## Features
-
-- **Automatic Driver Resolution**: Find compatible NVIDIA driver versions across EKS AMIs
-- **AMI Compatibility Checking**: Validates AL2/AL2023 support for different Kubernetes versions
-- **Container Package Discovery**: Locates NVIDIA .deb packages for container builds
-- **Nodegroup Configuration Generation**: Creates ready-to-use EKS nodegroup configurations
-- **Template-Based Configuration**: Flexible JSON templates with command-line overrides
-- **Migration Path Guidance**: Provides recommendations for AL2 → AL2023 migrations
-
-## Prerequisites
+### Prerequisites
 
 - Python 3.7+
 - AWS CLI configured with appropriate permissions
-- Required Python packages: `requests`, `beautifulsoup4`
+
+### Dependencies
 
 ```bash
-pip install requests beautifulsoup4
+pip install beautifulsoup4 tabulate pyyaml requests
 ```
 
-### Required AWS Permissions
+### AWS Permissions
 
-Your AWS credentials need the following permissions:
+Your AWS credentials need these permissions:
+
 ```json
 {
     "Version": "2012-10-17",
@@ -61,325 +87,691 @@ Your AWS credentials need the following permissions:
 }
 ```
 
-## Quick Start
+## Unified CLI Commands
 
-### 1. Generate a Template (First Time Setup)
+The unified CLI provides four main commands:
+
+| Command | Purpose | Example |
+|---------|---------|---------|
+| `parse` | Parse EKS AMI releases and find NVIDIA driver versions | `parse --k8s-version 1.32` |
+| `align` | Align NVIDIA drivers between AMIs and containers | `align --strategy ami-first` |
+| `template` | Generate, validate, and merge nodegroup templates | `template --generate --workload ml-training` |
+| `version` | Show version and capability information | `version --verbose` |
+
+### Basic Command Structure
 
 ```bash
-python eks_nvidia_alignment.py --generate-template
+python -m eks_nvidia_tools.cli.main <command> [options]
+
+# Or create an alias for convenience:
+alias eks-nvidia-tools="python -m eks_nvidia_tools.cli.main"
+eks-nvidia-tools parse --help
 ```
 
-This creates a `nodegroup_template.json` file with all AWS EKS parameters. Edit the required fields:
-- `clusterName`: Your EKS cluster name
-- `nodeRole`: Your EKS node instance role ARN
-- `subnets`: Your subnet IDs
+## Command Reference
 
-### 2. AMI-First Strategy (Recommended)
+### Parse Command
 
-Use the latest AMI and update containers to match:
+Search and analyze EKS AMI releases for NVIDIA driver information.
 
 ```bash
-python eks_nvidia_alignment.py \
+# Basic usage
+python -m eks_nvidia_tools.cli.main parse [options]
+
+# Key options:
+--k8s-version VERSION          # Kubernetes version (e.g., 1.32, 1.31)
+--driver-version VERSION       # NVIDIA driver version to search
+--architecture {x86_64,arm64}  # Target architecture
+--ami-type TYPE                # Specific AMI type to search
+--fuzzy                        # Use fuzzy matching for driver search
+--latest                       # Find latest release for K8s version
+--list-versions                # List all available K8s versions
+--output {table,json,yaml}     # Output format
+--debug-release RELEASE        # Debug specific release
+```
+
+### Align Command
+
+Align NVIDIA drivers between EKS AMIs and container images.
+
+```bash
+# Basic usage
+python -m eks_nvidia_tools.cli.main align --strategy STRATEGY [options]
+
+# Required options:
+--strategy {ami-first,container-first}  # Alignment strategy
+
+# Target options:
+--cluster-name NAME            # EKS cluster name
+--k8s-version VERSION          # Kubernetes version (alternative to cluster-name)
+--architecture {x86_64,arm64}  # Target architecture
+
+# Strategy-specific options:
+--current-driver-version VER   # Required for container-first strategy
+
+# Configuration options:
+--nodegroup-name NAME          # Override nodegroup name
+--template PATH                # Custom template file
+--instance-types TYPE [TYPE...] # EC2 instance types
+--capacity-type {ON_DEMAND,SPOT} # Capacity type
+--min-size, --max-size, --desired-size # Scaling configuration
+
+# Execution options:
+--plan-only                    # Show plan without executing
+--output-file FILE             # Output configuration file
+--generate-template            # Generate sample template and exit
+```
+
+### Template Command
+
+Generate, validate, and merge nodegroup templates.
+
+```bash
+# Basic usage
+python -m eks_nvidia_tools.cli.main template [operation] [options]
+
+# Operations:
+--generate                     # Generate new template
+--validate FILE                # Validate existing template
+--merge FILE [FILE...]         # Merge multiple templates
+
+# Generation options:
+--workload {ml-training,ml-inference,general-gpu,custom}
+--cluster-name NAME            # EKS cluster name
+--nodegroup-name NAME          # Nodegroup name
+--architecture {x86_64,arm64}  # Target architecture
+
+# Instance configuration:
+--instance-types TYPE [TYPE...] # EC2 instance types
+--capacity-type {ON_DEMAND,SPOT} # Capacity type
+--disk-size SIZE               # Disk size in GB
+
+# Scaling configuration:
+--min-size, --max-size, --desired-size # Node scaling
+
+# Output:
+--output-file FILE             # Output template file
+--output {table,json,yaml}     # Output format
+```
+
+### Version Command
+
+Display version and capability information.
+
+```bash
+# Basic usage
+python -m eks_nvidia_tools.cli.main version [options]
+
+# Options:
+--verbose                      # Show detailed version info
+--output {table,json,yaml}     # Output format
+```
+
+## Architecture Support
+
+### x86_64 (Intel/AMD) Support
+
+```bash
+# Default architecture - explicit specification optional
+python -m eks_nvidia_tools.cli.main parse --k8s-version 1.32
+
+# Explicit x86_64 specification
+python -m eks_nvidia_tools.cli.main parse --k8s-version 1.32 --architecture x86_64
+
+# Supported AMI types:
+# - AL2023_x86_64_NVIDIA (recommended)
+# - AL2_x86_64_GPU (deprecated)
+
+# Common instance types: g4dn.*, g5.*, p3.*, p4d.*
+```
+
+### ARM64 (Graviton) Support
+
+```bash
+# ARM64 architecture with explicit specification
+python -m eks_nvidia_tools.cli.main parse --k8s-version 1.32 --architecture arm64
+
+# Template generation for ARM64
+python -m eks_nvidia_tools.cli.main template --generate --workload ml-training --architecture arm64
+
+# Supported AMI types:
+# - AL2023_ARM_64_NVIDIA
+
+# Common instance types: g5g.*, c6g.*, m6g.*, r6g.*
+```
+
+### Architecture-Specific Examples
+
+```bash
+# Compare driver availability across architectures
+python -m eks_nvidia_tools.cli.main parse --driver-version 570.124.06 --architecture x86_64
+python -m eks_nvidia_tools.cli.main parse --driver-version 570.124.06 --architecture arm64
+
+# Generate templates for multi-arch deployment
+python -m eks_nvidia_tools.cli.main template --generate --workload general-gpu --architecture x86_64 --output-file x86-template.json
+python -m eks_nvidia_tools.cli.main template --generate --workload general-gpu --architecture arm64 --output-file arm64-template.json
+```
+
+## Driver Alignment Strategies
+
+### AMI-First Strategy (Recommended)
+
+Use the latest EKS AMI and update container drivers to match.
+
+**Benefits:**
+- ✅ Latest security patches and optimizations
+- ✅ Best long-term support
+- ✅ Future-proof approach
+
+**Use Cases:**
+- New deployments
+- Regular maintenance windows
+- CI/CD pipeline updates
+
+```bash
+# Basic AMI-first alignment
+python -m eks_nvidia_tools.cli.main align \
+    --strategy ami-first \
+    --cluster-name my-production-cluster \
+    --architecture x86_64
+
+# AMI-first with custom configuration
+python -m eks_nvidia_tools.cli.main align \
     --strategy ami-first \
     --cluster-name my-cluster \
-    --nodegroup-name gpu-workers
+    --nodegroup-name gpu-workers-v2 \
+    --instance-types g5.2xlarge g5.4xlarge \
+    --capacity-type SPOT \
+    --min-size 2 --max-size 20 --desired-size 5
 ```
 
-### 3. Container-First Strategy
+### Container-First Strategy
 
-Find AMI compatible with existing container drivers:
+Keep existing container drivers and find compatible AMI.
+
+**Benefits:**
+- ✅ No container image changes required
+- ✅ Useful for legacy applications
+- ✅ Minimal disruption to existing workflows
+
+**Use Cases:**
+- Legacy application support
+- Vendor-locked container images
+- Gradual migration scenarios
 
 ```bash
-python eks_nvidia_alignment.py \
+# Basic container-first alignment
+python -m eks_nvidia_tools.cli.main align \
     --strategy container-first \
-    --cluster-name my-cluster \
     --current-driver-version 570.124.06 \
-    --nodegroup-name gpu-workers
-```
+    --cluster-name my-production-cluster
 
-## Core Components
-
-### 1. `eks_nvidia_alignment.py` - Main Orchestrator
-
-The primary tool that coordinates driver alignment strategies.
-
-**Key Commands:**
-
-```bash
-# Plan only (show what would be done)
-python eks_nvidia_alignment.py --strategy ami-first --cluster-name my-cluster --plan-only
-
-# Generate template with custom values
-python eks_nvidia_alignment.py --generate-template --nodegroup-name gpu-workers --instance-types g4dn.xlarge
-
-# Override template values
-python eks_nvidia_alignment.py \
-    --strategy ami-first \
-    --cluster-name my-cluster \
-    --instance-types g4dn.2xlarge g5.xlarge \
-    --min-size 1 --max-size 10 --desired-size 3
-```
-
-### 2. `eks_ami_parser.py` - EKS AMI Release Parser
-
-Standalone tool for querying EKS AMI releases and NVIDIA driver versions.
-
-**Examples:**
-
-```bash
-# List available Kubernetes versions
-python eks_ami_parser.py --list-versions
-
-# Find latest driver for K8s version
-python eks_ami_parser.py --k8s-version 1.31 --latest
-
-# Search for specific driver version
-python eks_ami_parser.py --driver-version 570.124.06
-
-# Search with fuzzy matching
-python eks_ami_parser.py --driver-version 570 --fuzzy
-
-# Debug a specific release
-python eks_ami_parser.py --debug-release v20241121
-```
-
-## Configuration Templates
-
-### Template Structure
-
-The `nodegroup_template.json` supports all AWS EKS nodegroup parameters:
-
-```json
-{
-  "clusterName": "my-cluster",
-  "nodegroupName": "gpu-workers",
-  "nodeRole": "arn:aws:iam::123456789012:role/EKSNodeInstanceRole",
-  "subnets": ["subnet-12345", "subnet-67890"],
-  "instanceTypes": ["g4dn.xlarge"],
-  "amiType": "AL2023_x86_64_NVIDIA",
-  "scalingConfig": {
-    "minSize": 0,
-    "maxSize": 10,
-    "desiredSize": 1
-  },
-  "labels": {
-    "node-type": "gpu-worker",
-    "nvidia.com/gpu": "true"
-  }
-}
-```
-
-### Command Line Overrides
-
-Any template value can be overridden via command line:
-
-```bash
-python eks_nvidia_alignment.py \
-    --strategy ami-first \
-    --cluster-name my-cluster \
-    --instance-types g5.2xlarge \      # Override instanceTypes
-    --capacity-type SPOT \             # Override capacityType
-    --min-size 2 --max-size 20        # Override scaling config
-```
-
-## Advanced Usage
-
-### Working with Multiple Kubernetes Versions
-
-Prepare nodegroups for cluster upgrades:
-
-```bash
-# Current cluster is 1.30, prepare for 1.31 upgrade
-python eks_nvidia_alignment.py \
-    --strategy ami-first \
-    --cluster-name my-cluster \
+# Container-first with specific K8s version
+python -m eks_nvidia_tools.cli.main align \
+    --strategy container-first \
+    --current-driver-version 550.127.08 \
     --k8s-version 1.31 \
-    --nodegroup-name gpu-workers-131
+    --architecture arm64 \
+    --nodegroup-name legacy-gpu-workers
 ```
 
-### AL2 to AL2023 Migration
+## Template Management
 
-Check AL2 compatibility and get migration guidance:
+### Workload-Optimized Templates
+
+Generate templates optimized for specific GPU workloads:
 
 ```bash
-# Check if your driver version is available in AL2023
-python eks_ami_parser.py \
-    --driver-version 570.124.06 \
-    --ami-type AL2023_x86_64_NVIDIA
-
-# Find latest AL2023 driver for migration
-python eks_ami_parser.py \
-    --k8s-version 1.31 \
-    --ami-type AL2023_x86_64_NVIDIA \
-    --latest
-```
-
-### Container Image Updates
-
-For AMI-first strategy, update your Dockerfile:
-
-```dockerfile
-# Use the driver version from tool output
-ARG NVIDIA_DRIVER_VER="570_570.124.06-1ubuntu0.22.04.1"
-
-# Download and install NVIDIA packages
-RUN curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/libnvidia-compute-570_${NVIDIA_DRIVER_VER}_amd64.deb \
-    -o libnvidia-compute.deb && \
-    dpkg -i libnvidia-compute.deb
-```
-
-### Custom Templates
-
-Create specialized templates for different workload types:
-
-```bash
-# Create training workload template
-python eks_nvidia_alignment.py --generate-template \
-    --nodegroup-name ml-training \
-    --instance-types g5.12xlarge \
+# ML Training workload (high memory, multiple GPUs)
+python -m eks_nvidia_tools.cli.main template \
+    --generate \
+    --workload ml-training \
+    --cluster-name ml-cluster \
+    --instance-types g5.12xlarge g5.24xlarge \
     --capacity-type SPOT \
     --max-size 50
 
-# Create inference workload template  
-python eks_nvidia_alignment.py --generate-template \
-    --nodegroup-name ml-inference \
-    --instance-types g4dn.xlarge \
+# ML Inference workload (cost-optimized, auto-scaling)
+python -m eks_nvidia_tools.cli.main template \
+    --generate \
+    --workload ml-inference \
+    --cluster-name inference-cluster \
+    --instance-types g4dn.xlarge g4dn.2xlarge \
     --capacity-type ON_DEMAND \
-    --max-size 10
+    --min-size 1 --max-size 10
+
+# General GPU workload (balanced configuration)
+python -m eks_nvidia_tools.cli.main template \
+    --generate \
+    --workload general-gpu \
+    --cluster-name general-cluster \
+    --architecture arm64 \
+    --instance-types g5g.xlarge
+```
+
+### Template Validation and Merging
+
+```bash
+# Validate existing template
+python -m eks_nvidia_tools.cli.main template \
+    --validate nodegroup-template.json
+
+# Merge multiple templates
+python -m eks_nvidia_tools.cli.main template \
+    --merge base-template.json override-template.json \
+    --output-file merged-template.json
+
+# Validate with different output formats
+python -m eks_nvidia_tools.cli.main template \
+    --validate my-template.json \
+    --output json
+```
+
+## Comprehensive Examples
+
+### Example 1: Complete x86_64 ML Training Setup
+
+```bash
+# Step 1: Check available Kubernetes versions
+python -m eks_nvidia_tools.cli.main parse --list-versions
+
+# Step 2: Find latest driver for target K8s version
+python -m eks_nvidia_tools.cli.main parse \
+    --k8s-version 1.32 \
+    --architecture x86_64 \
+    --latest
+
+# Step 3: Generate optimized template for ML training
+python -m eks_nvidia_tools.cli.main template \
+    --generate \
+    --workload ml-training \
+    --cluster-name ml-production \
+    --nodegroup-name training-workers \
+    --architecture x86_64 \
+    --instance-types g5.12xlarge g5.24xlarge \
+    --capacity-type SPOT \
+    --min-size 0 --max-size 20 --desired-size 2 \
+    --output-file ml-training-template.json
+
+# Step 4: Align drivers using AMI-first strategy
+python -m eks_nvidia_tools.cli.main align \
+    --strategy ami-first \
+    --cluster-name ml-production \
+    --template ml-training-template.json \
+    --output-file ml-nodegroup-config.json
+
+# Step 5: Review configuration before deployment
+cat ml-nodegroup-config.json | python -m json.tool
+```
+
+### Example 2: ARM64 Inference Deployment
+
+```bash
+# Step 1: Check ARM64 driver availability
+python -m eks_nvidia_tools.cli.main parse \
+    --k8s-version 1.32 \
+    --architecture arm64 \
+    --output json
+
+# Step 2: Generate ARM64 inference template
+python -m eks_nvidia_tools.cli.main template \
+    --generate \
+    --workload ml-inference \
+    --cluster-name inference-arm64 \
+    --nodegroup-name inference-workers \
+    --architecture arm64 \
+    --instance-types g5g.xlarge g5g.2xlarge \
+    --capacity-type ON_DEMAND \
+    --output-file arm64-inference-template.json
+
+# Step 3: Plan deployment (dry run)
+python -m eks_nvidia_tools.cli.main align \
+    --strategy ami-first \
+    --cluster-name inference-arm64 \
+    --architecture arm64 \
+    --template arm64-inference-template.json \
+    --plan-only
+
+# Step 4: Execute deployment
+python -m eks_nvidia_tools.cli.main align \
+    --strategy ami-first \
+    --cluster-name inference-arm64 \
+    --architecture arm64 \
+    --template arm64-inference-template.json \
+    --output-file arm64-nodegroup-config.json
+```
+
+### Example 3: Legacy Container Migration
+
+```bash
+# Step 1: Identify current container driver version
+docker run --rm nvidia/cuda:11.8-runtime-ubuntu22.04 nvidia-smi --query-gpu=driver_version --format=csv,noheader,nounits
+
+# Step 2: Find compatible AMI for existing driver
+python -m eks_nvidia_tools.cli.main parse \
+    --driver-version 525.147.05 \
+    --architecture x86_64 \
+    --fuzzy
+
+# Step 3: Use container-first strategy for compatibility
+python -m eks_nvidia_tools.cli.main align \
+    --strategy container-first \
+    --current-driver-version 525.147.05 \
+    --cluster-name legacy-cluster \
+    --nodegroup-name legacy-gpu-workers \
+    --architecture x86_64 \
+    --output yaml
+
+# Step 4: Plan migration to newer drivers
+python -m eks_nvidia_tools.cli.main align \
+    --strategy ami-first \
+    --cluster-name legacy-cluster \
+    --nodegroup-name modern-gpu-workers \
+    --plan-only
+```
+
+### Example 4: Multi-Architecture Deployment
+
+```bash
+# Generate templates for both architectures
+python -m eks_nvidia_tools.cli.main template \
+    --generate \
+    --workload general-gpu \
+    --cluster-name multi-arch-cluster \
+    --nodegroup-name gpu-workers-x86 \
+    --architecture x86_64 \
+    --instance-types g4dn.xlarge \
+    --output-file x86-template.json
+
+python -m eks_nvidia_tools.cli.main template \
+    --generate \
+    --workload general-gpu \
+    --cluster-name multi-arch-cluster \
+    --nodegroup-name gpu-workers-arm64 \
+    --architecture arm64 \
+    --instance-types g5g.xlarge \
+    --output-file arm64-template.json
+
+# Align drivers for both architectures
+python -m eks_nvidia_tools.cli.main align \
+    --strategy ami-first \
+    --cluster-name multi-arch-cluster \
+    --architecture x86_64 \
+    --template x86-template.json \
+    --output-file x86-nodegroup-config.json
+
+python -m eks_nvidia_tools.cli.main align \
+    --strategy ami-first \
+    --cluster-name multi-arch-cluster \
+    --architecture arm64 \
+    --template arm64-template.json \
+    --output-file arm64-nodegroup-config.json
+
+# Deploy both nodegroups
+aws eks create-nodegroup --cli-input-json file://x86-nodegroup-config.json
+aws eks create-nodegroup --cli-input-json file://arm64-nodegroup-config.json
+```
+
+## Migration Guide
+
+### From Legacy Scripts to Unified CLI
+
+The new unified CLI maintains full backward compatibility while providing enhanced functionality:
+
+#### Legacy Command Mapping
+
+| Legacy Command | New Unified Command |
+|----------------|-------------------|
+| `python eks_ami_parser.py --k8s-version 1.32` | `python -m eks_nvidia_tools.cli.main parse --k8s-version 1.32` |
+| `python eks_nvidia_alignment.py --strategy ami-first` | `python -m eks_nvidia_tools.cli.main align --strategy ami-first` |
+| `python eks_nvidia_alignment.py --generate-template` | `python -m eks_nvidia_tools.cli.main template --generate` |
+
+#### Migration Benefits
+
+- **Consistent Interface** - Unified argument parsing and validation
+- **Enhanced Output** - Multiple formats (table, JSON, YAML)
+- **Better Error Handling** - Detailed validation and helpful messages
+- **Progress Feedback** - Real-time operation status
+- **Improved Help** - Comprehensive documentation and examples
+
+#### Gradual Migration Approach
+
+1. **Phase 1**: Start using new commands alongside legacy scripts
+2. **Phase 2**: Update automation scripts to use new CLI
+3. **Phase 3**: Deprecate legacy script usage
+4. **Phase 4**: Remove legacy scripts (optional)
+
+```bash
+# Legacy scripts still work with deprecation warnings
+python eks_ami_parser.py --k8s-version 1.32
+# Warning: eks_ami_parser.py is deprecated. Please use 'eks-nvidia-tools parse' instead.
+
+# New unified interface
+python -m eks_nvidia_tools.cli.main parse --k8s-version 1.32 --output json
 ```
 
 ## Troubleshooting
 
-### Common Issues
+### Common Issues and Solutions
 
-**1. Driver Version Not Found**
-```
-❌ No compatible AMI found for driver version X.Y.Z
-```
-- Check if version format is correct (e.g., `570.124.06`)
-- Use `--fuzzy` search to find similar versions
-- Consider using AMI-first strategy for latest drivers
+#### 1. Driver Version Not Found
 
-**2. AL2 Compatibility Warnings**
-```
-⚠️ WARNING: This AMI uses deprecated Amazon Linux 2
-```
-- AL2 support ended November 26, 2024
-- Migrate to AL2023 with newer driver versions
-- Use `--ami-type AL2023_x86_64_NVIDIA` filter
+```bash
+# Problem: No compatible AMI found for driver version
+# Solution: Use fuzzy search to find similar versions
+python -m eks_nvidia_tools.cli.main parse \
+    --driver-version 570 \
+    --fuzzy \
+    --architecture x86_64
 
-**3. Template Validation Errors**
+# Alternative: Check what's available for your K8s version
+python -m eks_nvidia_tools.cli.main parse \
+    --k8s-version 1.32 \
+    --latest
 ```
-❌ Missing required fields in configuration
-```
-- Run `--generate-template` to create a complete template
-- Ensure required fields are set: `clusterName`, `nodeRole`, `subnets`
-- Use command line overrides for missing values
 
-**4. AWS CLI Errors**
+#### 2. Architecture Compatibility Issues
+
+```bash
+# Problem: Instance type incompatible with architecture
+# Solution: Check architecture-specific instance types
+python -m eks_nvidia_tools.cli.main template \
+    --generate \
+    --architecture arm64 \
+    --instance-types g5g.xlarge  # ARM64-compatible
+
+# Avoid: g4dn.xlarge with ARM64 (x86_64 only)
 ```
-❌ Failed to get cluster version: AccessDenied
+
+#### 3. Template Validation Errors
+
+```bash
+# Problem: Template validation fails
+# Solution: Validate and fix template
+python -m eks_nvidia_tools.cli.main template \
+    --validate my-template.json \
+    --output json
+
+# Fix common issues:
+# - Missing required fields (clusterName, nodeRole, subnets)
+# - Invalid instance types for architecture
+# - Incorrect scaling configuration
 ```
-- Verify AWS CLI configuration: `aws sts get-caller-identity`
-- Check IAM permissions for EKS operations
-- Ensure correct `--aws-profile` and `--aws-region`
+
+#### 4. AWS Permission Issues
+
+```bash
+# Problem: AccessDenied errors
+# Solution: Verify AWS configuration and permissions
+aws sts get-caller-identity
+aws eks describe-cluster --name my-cluster
+
+# Check EKS permissions:
+# - eks:DescribeCluster
+# - eks:DescribeNodegroup
+# - eks:CreateNodegroup
+```
 
 ### Debug Mode
 
-Enable detailed logging for troubleshooting:
+Enable verbose output for detailed troubleshooting:
 
 ```bash
-python eks_nvidia_alignment.py \
-    --strategy container-first \
-    --current-driver-version 570.124.06 \
-    --cluster-name my-cluster \
-    --debug
+# Enable global verbose mode
+python -m eks_nvidia_tools.cli.main --verbose parse --k8s-version 1.32
+
+# Command-specific debug options
+python -m eks_nvidia_tools.cli.main parse --debug-release v20241121
 ```
 
-### Manual Verification
+### Output Formats for Automation
 
-Verify generated configurations before deployment:
+Use structured output formats for scripting and automation:
 
 ```bash
-# Validate JSON syntax
-cat nodegroup-gpu-workers-config.json | python -m json.tool
+# JSON output for programmatic parsing
+python -m eks_nvidia_tools.cli.main parse \
+    --k8s-version 1.32 \
+    --output json | jq '.results[0].driver_version'
 
-# Test AWS CLI command
-aws eks create-nodegroup --cli-input-json file://nodegroup-gpu-workers-config.json --generate-cli-skeleton
+# YAML output for configuration management
+python -m eks_nvidia_tools.cli.main template \
+    --generate \
+    --workload ml-training \
+    --output yaml > training-config.yaml
 ```
+
+## Legacy Compatibility
+
+### Backward Compatibility Support
+
+The unified CLI maintains full backward compatibility with legacy scripts:
+
+```bash
+# Legacy scripts continue to work
+python eks_ami_parser.py --k8s-version 1.32
+python eks_nvidia_alignment.py --strategy ami-first --cluster-name my-cluster
+
+# Deprecation warnings guide users to new interface
+# Warning: eks_ami_parser.py is deprecated. Please use 'eks-nvidia-tools parse' instead.
+```
+
+### Legacy Script Mapping
+
+| Legacy Script | Purpose | New Command |
+|---------------|---------|-------------|
+| `eks_ami_parser.py` | AMI parsing and driver search | `parse` |
+| `eks_nvidia_alignment.py` | Driver alignment and nodegroup config | `align` + `template` |
+
+### Migration Assistance
+
+The new CLI provides enhanced capabilities not available in legacy scripts:
+
+- **Template Management** - Generate, validate, merge templates
+- **Multi-Format Output** - JSON, YAML, table formats
+- **Architecture Support** - Explicit ARM64 support
+- **Progress Feedback** - Real-time operation status
+- **Enhanced Validation** - Comprehensive input validation
 
 ## Output Examples
 
-### AMI-First Strategy Output
+### Parse Command Output
 
-```
-🔄 Using specified K8s version 1.31
-🔄 Finding latest AMI for Kubernetes 1.31...
-📦 Latest AMI: v20241121
-🔧 AMI driver version: 570.124.06-1.amzn2023
+```bash
+$ python -m eks_nvidia_tools.cli.main parse --k8s-version 1.32 --latest
 
-📋 GENERATED NODEGROUP CONFIGURATION:
-{
-  "clusterName": "my-cluster",
-  "nodegroupName": "gpu-workers", 
-  "version": "1.31",
-  "releaseVersion": "1.31-20241121",
-  "amiType": "AL2023_x86_64_NVIDIA"
-}
+Finding latest release for K8s 1.32... ✓ Done (2.1s)
 
-🔧 Container Driver Information:
-• Update containers to use driver version: 570_570.124.06-1ubuntu0.22.04.1
-• NVIDIA driver packages to install in containers:
-  - libnvidia-compute: https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/libnvidia-compute-570_570.124.06-1ubuntu0.22.04.1_amd64.deb
+┌─────────────────┬──────────────────┬─────────────────┐
+│ Release Version │ Driver Version   │ Release Date    │
+├─────────────────┼──────────────────┼─────────────────┤
+│ v20241121       │ 570.124.06       │ 2024-11-21      │
+└─────────────────┴──────────────────┴─────────────────┘
 ```
 
-### Container-First Strategy Output
+### Align Command Output
 
+```bash
+$ python -m eks_nvidia_tools.cli.main align --strategy ami-first --cluster-name my-cluster
+
+Finding latest AMI for Kubernetes version... ✓ Done (1.8s)
+
+┌─────────────────────────┬────────────────────────────────────┐
+│ Property                │ Value                              │
+├─────────────────────────┼────────────────────────────────────┤
+│ Strategy                │ ami-first                          │
+│ Kubernetes Version      │ 1.32                               │
+│ Architecture            │ x86_64                             │
+│ AMI Release Version     │ 20241121                           │
+│ AMI Driver Version      │ 570.124.06-1.amzn2023             │
+│ Container Driver Version│ 570.124.06                        │
+│ Formatted Driver Version│ 570_570.124.06-1ubuntu0.22.04.1   │
+└─────────────────────────┴────────────────────────────────────┘
+
+Generating nodegroup configuration... ✓ Done (0.2s)
+✓ x86_64 configuration generation completed!
+ℹ Use the generated configuration to create your nodegroup when ready.
 ```
-🔍 Found 1 matching AMI releases
-📋 Compatible releases found:
-   1. v20241015 (K8s 1.30) - AL2023_x86_64_NVIDIA: 570.124.06-1.amzn2023
-🎯 Selected AL2023 release: v20241015
 
-📋 GENERATED NODEGROUP CONFIGURATION:
-{
-  "clusterName": "my-cluster",
-  "nodegroupName": "gpu-workers",
-  "version": "1.30", 
-  "releaseVersion": "1.30-20241015",
-  "amiType": "AL2023_x86_64_NVIDIA"
-}
+### Template Command Output
 
-💡 Next steps:
-1. Review the generated configuration in nodegroup-gpu-workers-config.json
-2. Create the nodegroup using: aws eks create-nodegroup --cli-input-json file://nodegroup-gpu-workers-config.json
+```bash
+$ python -m eks_nvidia_tools.cli.main template --generate --workload ml-training --architecture arm64
+
+Building nodegroup configuration... ✓ Done (0.1s)
+Generating ml-training template... ✓ Done (0.3s)
+Writing template to nodegroup-ml-training-arm64.json... ✓ Done (0.0s)
+
+Template Configuration:
+  Name: gpu-workers-arm64
+  Type: ml-training
+  Architecture: arm64
+  Instance Type: N/A
+  AMI Type: AL2023_ARM_64_NVIDIA
+
+✓ Template generated: nodegroup-ml-training-arm64.json
+ℹ Configuration for ARM64:
+ℹ   • Workload: ml-training
+ℹ   • Instance types: ['g5g.xlarge']
+ℹ   • Capacity type: ON_DEMAND
+ℹ   • Scaling: 0-10 nodes
 ```
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit issues, feature requests, or pull requests.
+Contributions are welcome! This project follows a modular architecture with clear separation of concerns:
+
+```
+eks_nvidia_tools/
+├── cli/                    # CLI interface and commands
+├── core/                   # Core AMI parsing logic
+├── models/                 # Data models and types
+├── utils/                  # Utility functions
+└── tests/                  # Test suites
+```
 
 ### Development Setup
 
 ```bash
 git clone <repository-url>
-cd eks-nvidia-alignment-toolkit
-pip install -r requirements.txt  # If requirements.txt exists
+cd eks-gpu
+pip install beautifulsoup4 tabulate pyyaml requests
+
+# Run tests
+python test_cli_comprehensive.py
 ```
 
-### Testing
-
-Test with different scenarios:
+### Testing Different Scenarios
 
 ```bash
-# Test AMI-first with various K8s versions
-python eks_nvidia_alignment.py --strategy ami-first --k8s-version 1.31 --plan-only
+# Test all CLI commands
+python -m eks_nvidia_tools.cli.main version --verbose
+python -m eks_nvidia_tools.cli.main parse --list-versions
+python -m eks_nvidia_tools.cli.main template --generate --workload general-gpu
 
-# Test container-first with different driver versions  
-python eks_nvidia_alignment.py --strategy container-first --current-driver-version 550.127.08 --plan-only
-
-# Test template generation
-python eks_nvidia_alignment.py --generate-template --nodegroup-name test-nodegroup
+# Test architecture support
+python -m eks_nvidia_tools.cli.main parse --k8s-version 1.32 --architecture arm64
+python -m eks_nvidia_tools.cli.main template --generate --architecture arm64
 ```
 
 ## License
@@ -388,10 +780,14 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Acknowledgments
 
-- AWS EKS team for comprehensive AMI documentation
-- NVIDIA for maintaining public driver repositories
-- Community contributors for testing and feedback
+- AWS EKS team for comprehensive AMI documentation and ARM64 support
+- NVIDIA for maintaining public driver repositories across architectures
+- Community contributors for testing and feedback on multi-architecture deployments
 
 ---
 
-**🎯 Pro Tip**: Always test configurations in a development environment before applying to production clusters!
+**🎯 Pro Tip**: Use `--plan-only` mode to preview changes before execution, especially in production environments!
+
+**🚀 ARM64 Tip**: When deploying on ARM64, use Graviton-optimized instance types (g5g.*, c6g.*, etc.) for best price/performance ratio!
+
+**📊 Automation Tip**: Use JSON/YAML output formats with `--output json` for integration with CI/CD pipelines and infrastructure-as-code tools!

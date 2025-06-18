@@ -16,7 +16,7 @@ import subprocess
 import sys
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
-from eks_ami_parser import EKSAMIParser
+from eks_ami_parser import EKSAMIParserCLI as EKSAMIParser
 
 
 @dataclass
