@@ -105,18 +105,25 @@ def validate_driver_version(version: str) -> str:
     if not version:
         raise ValidationError("Driver version cannot be empty")
     
-    # NVIDIA driver versions are typically in format: XXX.XX or XXX.XX.XX
-    pattern = r'^(\d{3})\.(\d{2})(?:\.(\d{2}))?$'
-    match = re.match(pattern, version)
+    # NVIDIA driver versions can be in format: XXX, XXX.XX or XXX.XX.XX
+    # Support major-only versions for broader searches
+    pattern_full = r'^(\d{3})\.(\d{2,3})(?:\.(\d{2}))?$'
+    pattern_major = r'^(\d{3})$'
     
-    if not match:
+    match_full = re.match(pattern_full, version)
+    match_major = re.match(pattern_major, version)
+    
+    if match_full:
+        major = int(match_full.group(1))
+    elif match_major:
+        major = int(match_major.group(1))
+    else:
         raise ValidationError(
             f"Invalid NVIDIA driver version format: {version}. "
-            "Expected format: XXX.XX or XXX.XX.XX (e.g., 525.147, 525.147.05)"
+            "Expected format: XXX, XXX.XX or XXX.XX.XX (e.g., 550, 525.147, 525.147.05)"
         )
     
     # Basic sanity check for reasonable driver version ranges
-    major = int(match.group(1))
     if major < 450 or major > 600:
         raise ValidationError(
             f"NVIDIA driver version {major}.x seems out of range. "
