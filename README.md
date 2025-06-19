@@ -222,6 +222,12 @@ eks-nvidia-tools align --strategy STRATEGY [options]
 --k8s-version VERSION          # Kubernetes version (alternative to cluster-name)
 --architecture {x86_64,arm64}  # Target architecture
 
+# Extraction mode:
+--extract-from-cluster CLUSTER # Extract nodegroup configurations from existing cluster
+--extract-nodegroups NAME [NAME...] # Specific nodegroups to extract (optional)
+--target-cluster CLUSTER      # Target cluster for new configurations (optional)
+--new-nodegroup-suffix SUFFIX # Custom suffix for new nodegroup names (optional)
+
 # Strategy-specific options:
 --current-driver-version VER   # Required for container-first strategy
 
@@ -397,6 +403,44 @@ eks-nvidia-tools align \
     --region ap-southeast-1
 ```
 
+### Extraction Mode (New!)
+
+Extract configurations from existing clusters and apply alignment strategies.
+
+**Benefits:**
+- ✅ Works with both ami-first and container-first strategies
+- ✅ Preserves existing nodegroup configurations
+- ✅ Generates AWS CLI compatible JSON files
+- ✅ Individual files named after new nodegroup names
+
+**Use Cases:**
+- Migrating existing nodegroups to newer AMI releases
+- Upgrading driver versions across multiple nodegroups
+- Creating aligned copies of production configurations
+
+```bash
+# Extract single nodegroup with ami-first strategy
+eks-nvidia-tools align \
+    --strategy ami-first \
+    --extract-from-cluster production \
+    --k8s-version 1.32 \
+    --profile production \
+    --region us-east-1
+
+# Extract specific nodegroups with container-first strategy
+eks-nvidia-tools align \
+    --strategy container-first \
+    --current-driver-version 570.133.20 \
+    --extract-from-cluster staging \
+    --extract-nodegroups gpu-workers-1 gpu-workers-2 \
+    --target-cluster production \
+    --profile staging \
+    --region us-west-2
+
+# Generated files: gpu-workers-1-2025-06-19T13-15-03.json, gpu-workers-2-2025-06-19T13-15-03.json
+# Usage: aws eks create-nodegroup --cli-input-json file://gpu-workers-1-2025-06-19T13-15-03.json
+```
+
 ## Template Management
 
 ### Workload-Optimized Templates
@@ -525,33 +569,37 @@ python -m eks_nvidia_tools.cli.main align \
     --output-file arm64-nodegroup-config.json
 ```
 
-### Example 3: Existing Container Migration
+### Example 3: Existing Cluster Migration with Extraction Mode
 
 ```bash
-# Step 1: Identify current container driver version
-docker run --rm nvidia/cuda:11.8-runtime-ubuntu22.04 nvidia-smi --query-gpu=driver_version --format=csv,noheader,nounits
-
-# Step 2: Find compatible AMI for existing driver
-python -m eks_nvidia_tools.cli.main parse \
-    --driver-version 525.147.05 \
-    --architecture x86_64 \
-    --fuzzy
-
-# Step 3: Use container-first strategy for compatibility
-python -m eks_nvidia_tools.cli.main align \
-    --strategy container-first \
-    --current-driver-version 525.147.05 \
-    --cluster-name existing-cluster \
-    --nodegroup-name existing-gpu-workers \
-    --architecture x86_64 \
-    --output yaml
-
-# Step 4: Plan migration to newer drivers
-python -m eks_nvidia_tools.cli.main align \
+# Step 1: Extract configurations from existing cluster
+eks-nvidia-tools align \
     --strategy ami-first \
-    --cluster-name existing-cluster \
-    --nodegroup-name updated-gpu-workers \
-    --plan-only
+    --extract-from-cluster production-cluster \
+    --k8s-version 1.32 \
+    --profile production \
+    --region us-east-1
+
+# This generates: eks-dev-gpu-2025-06-19T13-15-03.json
+
+# Step 2: Review the generated configuration
+cat eks-dev-gpu-2025-06-19T13-15-03.json | jq .
+
+# Step 3: Modify the release version if needed
+# Edit the JSON file to change releaseVersion: "1.31-20250519" → "1.31-20250403"
+
+# Step 4: Create the new nodegroup
+aws eks create-nodegroup --cli-input-json file://eks-dev-gpu-2025-06-19T13-15-03.json
+
+# Step 5: Extract multiple specific nodegroups
+eks-nvidia-tools align \
+    --strategy container-first \
+    --current-driver-version 570.133.20 \
+    --extract-from-cluster production-cluster \
+    --extract-nodegroups gpu-workers-1 gpu-workers-2 \
+    --target-cluster staging-cluster \
+    --profile production \
+    --region us-east-1
 ```
 
 ### Example 4: Multi-Architecture Deployment

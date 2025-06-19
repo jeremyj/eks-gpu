@@ -17,19 +17,8 @@ import sys
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from eks_ami_parser import EKSAMIParserCLI as EKSAMIParser
-
-
-@dataclass
-class DriverAlignment:
-    strategy: str
-    k8s_version: str
-    architecture: str
-    ami_release_version: str
-    ami_driver_version: str
-    container_driver_version: str
-    formatted_driver_version: str
-    deb_urls: List[str]
-    nodegroup_config: Dict
+from models.driver_alignment import DriverAlignment
+from models.ami_types import Architecture
 
 
 class EKSNodegroupManager:
@@ -370,7 +359,7 @@ class DriverAlignmentOrchestrator:
         return DriverAlignment(
             strategy="ami-first",
             k8s_version=k8s_version,
-            architecture=architecture,
+            architecture=Architecture.from_string(architecture),
             ami_release_version=ami_version,
             ami_driver_version=ami_driver_version,
             container_driver_version=ami_driver_version,
@@ -464,7 +453,7 @@ class DriverAlignmentOrchestrator:
         return DriverAlignment(
             strategy="container-first",
             k8s_version=found_k8s_version,
-            architecture=architecture,
+            architecture=Architecture.from_string(architecture),
             ami_release_version=ami_version,
             ami_driver_version=actual_driver_version,  # Use actual AMI version
             container_driver_version=actual_driver_version,  # Show what AMI provides
@@ -478,7 +467,7 @@ class DriverAlignmentOrchestrator:
                          output_file: str = None) -> Dict:
         """Execute the alignment plan - both strategies generate nodegroup configurations."""
         
-        arch_display = alignment.architecture.upper() if alignment.architecture == "arm64" else "x86_64"
+        arch_display = alignment.architecture_display
         print(f"\n🚀 Executing {alignment.strategy} alignment strategy for {arch_display}...")
         
         results = {
@@ -504,7 +493,7 @@ class DriverAlignmentOrchestrator:
             template_overrides["labels"] = {}
         
         # Set architecture label
-        arch_label = "arm64" if alignment.architecture == "arm64" else "amd64"
+        arch_label = "arm64" if alignment.architecture.value == "arm64" else "amd64"
         template_overrides["labels"]["kubernetes.io/arch"] = arch_label
         
         # Add any additional overrides provided
@@ -528,7 +517,7 @@ class DriverAlignmentOrchestrator:
             print("="*80)
             
             # Output to file
-            arch_suffix = f"-{alignment.architecture}" if alignment.architecture == "arm64" else ""
+            arch_suffix = f"-{alignment.architecture.value}" if alignment.architecture.value == "arm64" else ""
             output_filename = output_file or f"nodegroup-{nodegroup_name}{arch_suffix}-config.json"
             try:
                 with open(output_filename, 'w') as f:
@@ -569,7 +558,7 @@ class DriverAlignmentOrchestrator:
             print("="*80)
             
             # Output to file
-            arch_suffix = f"-{alignment.architecture}" if alignment.architecture == "arm64" else ""
+            arch_suffix = f"-{alignment.architecture.value}" if alignment.architecture.value == "arm64" else ""
             output_filename = output_file or f"nodegroup-{nodegroup_name}{arch_suffix}-config.json"
             try:
                 with open(output_filename, 'w') as f:
@@ -582,21 +571,21 @@ class DriverAlignmentOrchestrator:
                 results["error"] = str(e)
             
             print(f"\n🔧 Container Driver Information ({arch_display}):")
-            print(f"   • Update your {alignment.architecture} containers to use driver version: {alignment.formatted_driver_version}")
-            print(f"   • NVIDIA driver packages to install in {alignment.architecture} containers:")
+            print(f"   • Update your {alignment.architecture.value} containers to use driver version: {alignment.formatted_driver_version}")
+            print(f"   • NVIDIA driver packages to install in {alignment.architecture.value} containers:")
             for url in alignment.deb_urls:
                 if not url.startswith("# NOT FOUND"):
                     package_name = url.split('/')[-1].split('_')[0]
                     print(f"     - {package_name}: {url}")
             
-            if alignment.architecture == "arm64":
+            if alignment.architecture.value == "arm64":
                 print(f"\n🏗️  ARM64 Container Build Notes:")
                 print(f"   • Use ARM64-compatible base images (e.g., --platform=linux/arm64)")
                 print(f"   • NVIDIA packages are downloaded from the 'sbsa' repository path")
                 print(f"   • Package names end with '_arm64.deb' instead of '_amd64.deb'")
             
             print(f"\n💡 Next steps:")
-            print(f"   1. Update your {alignment.architecture} container images with driver version: {alignment.formatted_driver_version}")
+            print(f"   1. Update your {alignment.architecture.value} container images with driver version: {alignment.formatted_driver_version}")
             print(f"   2. Review the generated nodegroup configuration in {output_filename}")
             print(f"   3. Create the nodegroup using: aws eks create-nodegroup --cli-input-json file://{output_filename}")
             print(f"\n📦 AMI Information:")
@@ -659,7 +648,7 @@ class DriverAlignmentOrchestrator:
     
     def print_alignment_summary(self, alignment: DriverAlignment):
         """Print a summary of the alignment plan."""
-        arch_display = alignment.architecture.upper() if alignment.architecture == "arm64" else "x86_64"
+        arch_display = alignment.architecture_display
         print("\n" + "="*80)
         print(f"DRIVER ALIGNMENT SUMMARY ({alignment.strategy.upper()}) - {arch_display}")
         print("="*80)
@@ -673,14 +662,14 @@ class DriverAlignmentOrchestrator:
         
         if alignment.strategy == "ami-first":
             print(f"\n🔧 Container Updates Required ({arch_display}):")
-            print(f"   • Update {alignment.architecture} container images to use driver: {alignment.formatted_driver_version}")
+            print(f"   • Update {alignment.architecture.value} container images to use driver: {alignment.formatted_driver_version}")
             print(f"   • Use these NVIDIA .deb packages in your Dockerfile:")
             for url in alignment.deb_urls:
                 if not url.startswith("# NOT FOUND"):
                     package_name = url.split('/')[-1].split('_')[0]
                     print(f"     - {package_name}")
             
-            if alignment.architecture == "arm64":
+            if alignment.architecture.value == "arm64":
                 print(f"   • Remember to use ARM64-compatible base images and package URLs")
             
             print(f"\n📦 Nodegroup Configuration:")
@@ -689,7 +678,7 @@ class DriverAlignmentOrchestrator:
         else:
             print(f"\nPurpose: Generate {arch_display} nodegroup configuration for existing container images")
             print(f"AMI Type: {alignment.nodegroup_config['ami_type']}")
-            print(f"Container compatibility: Your {alignment.architecture} containers should work with this AMI")
+            print(f"Container compatibility: Your {alignment.architecture.value} containers should work with this AMI")
         
         print("="*80)
 
