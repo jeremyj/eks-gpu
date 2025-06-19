@@ -646,11 +646,17 @@ class AlignCommand:
             
             # Save all alignments to file
             if all_alignments:
-                # Generate separate JSON file for each nodegroup using new nodegroup name
+                # Generate separate JSON file for each nodegroup using original name + new timestamp
                 saved_files = []
                 for ng, alignment in all_alignments:
+                    # Use the new nodegroup name (which already includes the timestamp) as the filename
                     new_nodegroup_name = alignment.nodegroup_config['nodegroupName']
-                    output_file = args.output_file or f"{new_nodegroup_name}.json"
+                    # Extract just the new timestamp part for the filename
+                    if args.output_file:
+                        output_file = args.output_file
+                    else:
+                        # Use the new nodegroup name directly as filename (it already has the correct timestamp)
+                        output_file = f"{new_nodegroup_name}.json"
                     
                     json_file = self._save_nodegroup_config(ng, alignment, output_file, formatter, args.profile, cluster_region)
                     if json_file:
@@ -745,9 +751,15 @@ class AlignCommand:
         # Start with the extracted nodegroup template
         merged_config = ng.to_template_dict()
         
+        # Get base nodegroup name without any existing timestamp suffix
+        import re
+        base_name = ng.nodegroup_name
+        # Remove any existing timestamp pattern (YYYY-MM-DDTHH-MM-SS)
+        base_name = re.sub(r'-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}$', '', base_name)
+        
         # Update with alignment-specific settings
         merged_config['clusterName'] = target_cluster
-        merged_config['nodegroupName'] = f"{ng.nodegroup_name}{nodegroup_suffix}"
+        merged_config['nodegroupName'] = f"{base_name}{nodegroup_suffix}"
         
         # Override with alignment config (AMI type, etc.)
         if 'ami_type' in alignment_config:
