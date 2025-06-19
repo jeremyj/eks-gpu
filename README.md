@@ -474,129 +474,124 @@ eks-nvidia-tools align \
 
 ## Template Management
 
-### Workload-Optimized Templates
+### Basic Template Generation
 
-Generate templates optimized for specific GPU workloads:
+Generate nodegroup templates with customizable configurations:
 
 ```bash
-# ML Training workload (high memory, multiple GPUs)
-python -m eks_nvidia_tools.cli.main template \
+# Generate basic GPU template for x86_64
+eks-nvidia-tools template \
     --generate \
-    --workload ml-training \
-    --cluster-name ml-cluster \
-    --instance-types g5.12xlarge g5.24xlarge \
-    --capacity-type SPOT \
-    --max-size 50
-
-# ML Inference workload (cost-optimized, auto-scaling)
-python -m eks_nvidia_tools.cli.main template \
-    --generate \
-    --workload ml-inference \
-    --cluster-name inference-cluster \
+    --cluster-name my-cluster \
+    --nodegroup-name gpu-workers \
+    --architecture x86_64 \
     --instance-types g4dn.xlarge g4dn.2xlarge \
     --capacity-type ON_DEMAND \
-    --min-size 1 --max-size 10
+    --min-size 1 --max-size 10 --desired-size 2
 
-# General GPU workload (balanced configuration)
-python -m eks_nvidia_tools.cli.main template \
+# Generate ARM64 template for Graviton instances
+eks-nvidia-tools template \
     --generate \
-    --workload general-gpu \
-    --cluster-name general-cluster \
+    --cluster-name arm64-cluster \
+    --nodegroup-name gpu-workers-arm64 \
     --architecture arm64 \
-    --instance-types g5g.xlarge
+    --instance-types g5g.xlarge g5g.2xlarge \
+    --capacity-type SPOT \
+    --disk-size 100
+
+# Generate template with output to file
+eks-nvidia-tools template \
+    --generate \
+    --cluster-name production \
+    --architecture x86_64 \
+    --output-file my-nodegroup-template.json
 ```
 
-### Template Validation and Merging
+### Template Validation
 
 ```bash
 # Validate existing template
-python -m eks_nvidia_tools.cli.main template \
-    --validate nodegroup-template.json
+eks-nvidia-tools template --validate nodegroup-template.json
 
-# Merge multiple templates
-python -m eks_nvidia_tools.cli.main template \
-    --merge base-template.json override-template.json \
-    --output-file merged-template.json
+# Validate with JSON output format
+eks-nvidia-tools template --validate my-template.json --output json
 
-# Validate with different output formats
-python -m eks_nvidia_tools.cli.main template \
-    --validate my-template.json \
-    --output json
+# Validate with specific AWS profile and region
+eks-nvidia-tools template --validate template.json --profile production --region us-east-1
 ```
 
 ## Comprehensive Examples
 
-### Example 1: Complete x86_64 ML Training Setup
+### Example 1: Complete x86_64 GPU Setup
 
 ```bash
 # Step 1: Check available Kubernetes versions
-python -m eks_nvidia_tools.cli.main parse --list-versions
+eks-nvidia-tools parse --list-versions
 
 # Step 2: Find latest driver for target K8s version
-python -m eks_nvidia_tools.cli.main parse \
+eks-nvidia-tools parse \
     --k8s-version 1.32 \
     --architecture x86_64 \
     --latest
 
-# Step 3: Generate optimized template for ML training
-python -m eks_nvidia_tools.cli.main template \
+# Step 3: Generate GPU nodegroup template
+eks-nvidia-tools template \
     --generate \
-    --workload ml-training \
-    --cluster-name ml-production \
-    --nodegroup-name training-workers \
+    --cluster-name gpu-production \
+    --nodegroup-name gpu-workers \
     --architecture x86_64 \
-    --instance-types g5.12xlarge g5.24xlarge \
-    --capacity-type SPOT \
-    --min-size 0 --max-size 20 --desired-size 2 \
-    --output-file ml-training-template.json
+    --instance-types g5.2xlarge g5.4xlarge \
+    --capacity-type ON_DEMAND \
+    --min-size 1 --max-size 10 --desired-size 3 \
+    --output-file gpu-template.json
 
 # Step 4: Align drivers using AMI-first strategy
-python -m eks_nvidia_tools.cli.main align \
+eks-nvidia-tools align \
     --strategy ami-first \
-    --cluster-name ml-production \
-    --template ml-training-template.json \
+    --cluster-name gpu-production \
+    --template gpu-template.json \
     --profile production \
     --region us-east-1 \
-    --output-file ml-nodegroup-config.json
+    --output-file gpu-nodegroup-config.json
 
 # Step 5: Review configuration before deployment
-cat ml-nodegroup-config.json | python -m json.tool
+cat gpu-nodegroup-config.json | jq .
 ```
 
-### Example 2: ARM64 Inference Deployment
+### Example 2: ARM64 GPU Deployment
 
 ```bash
 # Step 1: Check ARM64 driver availability
-python -m eks_nvidia_tools.cli.main parse \
+eks-nvidia-tools parse \
     --k8s-version 1.32 \
     --architecture arm64 \
     --output json
 
-# Step 2: Generate ARM64 inference template
-python -m eks_nvidia_tools.cli.main template \
+# Step 2: Generate ARM64 GPU template
+eks-nvidia-tools template \
     --generate \
-    --workload ml-inference \
-    --cluster-name inference-arm64 \
-    --nodegroup-name inference-workers \
+    --cluster-name gpu-arm64 \
+    --nodegroup-name gpu-workers-arm64 \
     --architecture arm64 \
     --instance-types g5g.xlarge g5g.2xlarge \
-    --capacity-type ON_DEMAND \
-    --output-file arm64-inference-template.json
+    --capacity-type SPOT \
+    --min-size 0 --max-size 5 --desired-size 1 \
+    --output-file arm64-gpu-template.json
 
 # Step 3: Plan deployment (dry run)
-python -m eks_nvidia_tools.cli.main align \
+eks-nvidia-tools align \
     --strategy ami-first \
-    --cluster-name inference-arm64 \
+    --cluster-name gpu-arm64 \
     --architecture arm64 \
-    --template arm64-inference-template.json \
+    --template arm64-gpu-template.json \
     --plan-only
 
 # Step 4: Execute deployment
-python -m eks_nvidia_tools.cli.main align \
+eks-nvidia-tools align \
     --strategy ami-first \
-    --cluster-name inference-arm64 \
+    --cluster-name gpu-arm64 \
     --architecture arm64 \
-    --template arm64-inference-template.json \
+    --template arm64-gpu-template.json \
     --output-file arm64-nodegroup-config.json
 ```
 
@@ -665,33 +660,33 @@ eks-nvidia-tools align \
 
 ```bash
 # Generate templates for both architectures
-python -m eks_nvidia_tools.cli.main template \
+eks-nvidia-tools template \
     --generate \
-    --workload general-gpu \
     --cluster-name multi-arch-cluster \
     --nodegroup-name gpu-workers-x86 \
     --architecture x86_64 \
-    --instance-types g4dn.xlarge \
+    --instance-types g4dn.xlarge g4dn.2xlarge \
+    --capacity-type ON_DEMAND \
     --output-file x86-template.json
 
-python -m eks_nvidia_tools.cli.main template \
+eks-nvidia-tools template \
     --generate \
-    --workload general-gpu \
     --cluster-name multi-arch-cluster \
     --nodegroup-name gpu-workers-arm64 \
     --architecture arm64 \
-    --instance-types g5g.xlarge \
+    --instance-types g5g.xlarge g5g.2xlarge \
+    --capacity-type SPOT \
     --output-file arm64-template.json
 
 # Align drivers for both architectures
-python -m eks_nvidia_tools.cli.main align \
+eks-nvidia-tools align \
     --strategy ami-first \
     --cluster-name multi-arch-cluster \
     --architecture x86_64 \
     --template x86-template.json \
     --output-file x86-nodegroup-config.json
 
-python -m eks_nvidia_tools.cli.main align \
+eks-nvidia-tools align \
     --strategy ami-first \
     --cluster-name multi-arch-cluster \
     --architecture arm64 \
