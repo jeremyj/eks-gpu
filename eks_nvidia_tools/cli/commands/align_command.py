@@ -780,11 +780,23 @@ class AlignCommand:
                 "tags": aws_config.get("tags", {})
             }
             
-            # Add optional fields if present
+            # Add optional fields if present, but filter out invalid fields
             if aws_config.get("updateConfig"):
-                aws_cli_config["updateConfig"] = aws_config["updateConfig"]
+                # Filter updateConfig to only include valid fields for nodegroup creation
+                update_config = aws_config["updateConfig"].copy()
+                # Remove updateStrategy as it's not valid for create-nodegroup
+                update_config.pop("updateStrategy", None)
+                if update_config:  # Only add if there are still valid fields
+                    aws_cli_config["updateConfig"] = update_config
             if aws_config.get("launchTemplate"):
-                aws_cli_config["launchTemplate"] = aws_config["launchTemplate"]
+                # Filter launchTemplate to only include valid fields for nodegroup creation
+                launch_template = aws_config["launchTemplate"].copy()
+                # Remove read-only fields that might be present in describe responses
+                launch_template.pop("name", None)  # name is read-only
+                launch_template.pop("version", None)  # version might need to be specified differently
+                if launch_template:
+                    aws_cli_config["launchTemplate"] = launch_template
+                    
             if aws_config.get("remoteAccess"):
                 aws_cli_config["remoteAccess"] = aws_config["remoteAccess"]
             
@@ -832,6 +844,7 @@ class AlignCommand:
         print("     - releaseVersion: Change AMI release (e.g., '1.31-20250519' → '1.31-20250403')")
         print("     - amiType: Change AMI type (AL2023_x86_64_NVIDIA, AL2_x86_64_GPU, etc.)")
         print("   • Re-run alignment with --current-driver-version for different strategy")
+        print("   • Note: Invalid fields for nodegroup creation are automatically filtered out")
         print()
         
         print("4. After verifying new nodegroups work correctly:")
