@@ -121,13 +121,32 @@ Your AWS credentials need these permissions:
             "Action": [
                 "eks:DescribeCluster",
                 "eks:DescribeNodegroup",
+                "eks:ListNodegroups",
                 "eks:CreateNodegroup"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "ssm:GetParameter"
+            ],
+            "Resource": "arn:aws:ssm:*:*:parameter/aws/service/eks/optimized-ami/*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "ec2:DescribeImages"
             ],
             "Resource": "*"
         }
     ]
 }
 ```
+
+**Note**: The SSM and EC2 permissions are required for the extraction mode to query actual AMI versions from AWS using the official SSM parameter paths:
+- `/aws/service/eks/optimized-ami/{version}/amazon-linux-2023/{arch}/nvidia/recommended/image_id`
+- `/aws/service/eks/optimized-ami/{version}/amazon-linux-2-gpu/recommended/image_id`
 
 ### AWS Configuration
 
@@ -410,8 +429,19 @@ Extract configurations from existing clusters and apply alignment strategies.
 **Benefits:**
 - ✅ Works with both ami-first and container-first strategies
 - ✅ Preserves existing nodegroup configurations
-- ✅ Generates AWS CLI compatible JSON files
+- ✅ Generates AWS CLI compatible JSON files with proper `releaseVersion` format
+- ✅ Uses actual AMI versions from AWS SSM parameters (region-specific)
 - ✅ Individual files named after new nodegroup names
+- ✅ Automatic filtering of invalid fields (e.g., `updateStrategy`)
+
+**Key Features:**
+- **Regional AMI Validation**: Queries AWS SSM parameters using official AWS paths to get actual AMI versions available in your region
+- **AWS-Compliant SSM Paths**: Uses exact SSM parameter paths from AWS documentation:
+  - `amazon-linux-2023/x86_64/nvidia` for AL2023 NVIDIA x86_64
+  - `amazon-linux-2023/arm64/nvidia` for AL2023 NVIDIA ARM64
+  - `amazon-linux-2-gpu` for AL2 GPU instances
+- **Proper Release Format**: Generates `releaseVersion` in correct format (e.g., `1.32.3-20250610`)
+- **EKS Compatibility**: JSON files work directly with `aws eks create-nodegroup --cli-input-json`
 
 **Use Cases:**
 - Migrating existing nodegroups to newer AMI releases
@@ -438,6 +468,7 @@ eks-nvidia-tools align \
     --region us-west-2
 
 # Generated files: gpu-workers-1-2025-06-19T13-15-03.json, gpu-workers-2-2025-06-19T13-15-03.json
+# Files contain proper releaseVersion: "1.32.3-20250610" format
 # Usage: aws eks create-nodegroup --cli-input-json file://gpu-workers-1-2025-06-19T13-15-03.json
 ```
 
@@ -569,6 +600,33 @@ python -m eks_nvidia_tools.cli.main align \
     --output-file arm64-nodegroup-config.json
 ```
 
+### Technical Details: AMI Version Resolution
+
+The extraction mode uses AWS SSM parameters to get actual AMI versions, ensuring compatibility with your specific region:
+
+```bash
+# Example SSM parameter queries (automatically handled by the tool):
+
+# For AL2023 NVIDIA x86_64:
+aws ssm get-parameter \
+  --name /aws/service/eks/optimized-ami/1.32/amazon-linux-2023/x86_64/nvidia/recommended/image_id \
+  --region eu-west-1
+
+# For AL2023 NVIDIA ARM64:
+aws ssm get-parameter \
+  --name /aws/service/eks/optimized-ami/1.32/amazon-linux-2023/arm64/nvidia/recommended/image_id \
+  --region us-west-2
+
+# For AL2 GPU (legacy):
+aws ssm get-parameter \
+  --name /aws/service/eks/optimized-ami/1.31/amazon-linux-2-gpu/recommended/image_id \
+  --region eu-central-1
+
+# The tool then queries the AMI description to extract the full K8s version:
+# "EKS Kubernetes Worker AMI... (k8s: 1.32.3, containerd: 1.7.*)"
+# Result: releaseVersion: "1.32.3-20250610"
+```
+
 ### Example 3: Existing Cluster Migration with Extraction Mode
 
 ```bash
@@ -580,18 +638,17 @@ eks-nvidia-tools align \
     --profile production \
     --region us-east-1
 
+# Output shows: "Using actual AMI release version: 1.32.3-20250610"
 # This generates: eks-dev-gpu-2025-06-19T13-15-03.json
 
 # Step 2: Review the generated configuration
-cat eks-dev-gpu-2025-06-19T13-15-03.json | jq .
+cat eks-dev-gpu-2025-06-19T13-15-03.json | jq .releaseVersion
+# Shows: "1.32.3-20250610" (proper format with patch version)
 
-# Step 3: Modify the release version if needed
-# Edit the JSON file to change releaseVersion: "1.31-20250519" → "1.31-20250403"
-
-# Step 4: Create the new nodegroup
+# Step 3: Create the new nodegroup (works without errors!)
 aws eks create-nodegroup --cli-input-json file://eks-dev-gpu-2025-06-19T13-15-03.json
 
-# Step 5: Extract multiple specific nodegroups
+# Step 4: Extract multiple specific nodegroups
 eks-nvidia-tools align \
     --strategy container-first \
     --current-driver-version 570.133.20 \
@@ -600,6 +657,8 @@ eks-nvidia-tools align \
     --target-cluster staging-cluster \
     --profile production \
     --region us-east-1
+
+# Each generated JSON contains region-specific AMI versions that actually exist
 ```
 
 ### Example 4: Multi-Architecture Deployment
@@ -698,7 +757,25 @@ python -m eks_nvidia_tools.cli.main template \
 # - Incorrect scaling configuration
 ```
 
-#### 4. AWS Permission Issues
+#### 4. Release Version Compatibility Issues
+
+```bash
+# Problem: "InvalidParameterException: Requested release version X is not valid"
+# Solution: The tool now automatically uses actual AWS AMI versions
+
+# Before (caused errors):
+# releaseVersion: "1.32-20250610" (missing patch version)
+
+# After (works correctly):
+# releaseVersion: "1.32.3-20250610" (includes patch version)
+
+# The tool now queries AWS SSM parameters using official AWS paths:
+# - /aws/service/eks/optimized-ami/1.32/amazon-linux-2023/x86_64/nvidia/recommended/image_id
+# - /aws/service/eks/optimized-ami/1.31/amazon-linux-2-gpu/recommended/image_id
+# No manual intervention needed - this is handled automatically
+```
+
+#### 5. AWS Permission Issues
 
 ```bash
 # Problem: AccessDenied errors
@@ -710,6 +787,8 @@ aws eks describe-cluster --name my-cluster --profile production --region us-west
 # - eks:DescribeCluster
 # - eks:DescribeNodegroup
 # - eks:CreateNodegroup
+# - ssm:GetParameter (for AMI version lookup)
+# - ec2:DescribeImages (for AMI description parsing)
 
 # Test with specific profile and region
 python -m eks_nvidia_tools.cli.main align \
@@ -720,7 +799,7 @@ python -m eks_nvidia_tools.cli.main align \
     --plan-only
 ```
 
-#### 5. AWS Profile/Region Configuration Issues
+#### 6. AWS Profile/Region Configuration Issues
 
 ```bash
 # Problem: Invalid AWS profile or region format
