@@ -562,6 +562,9 @@ class AlignCommand:
                 verbose=args.verbose
             )
             
+            # Store region for later use (will be used when generating JSON)
+            cluster_region = args.region
+            
             config = {
                 'aws_profile': args.profile,
                 'aws_region': args.region,
@@ -649,7 +652,7 @@ class AlignCommand:
                     new_nodegroup_name = alignment.nodegroup_config['nodegroupName']
                     output_file = args.output_file or f"{new_nodegroup_name}.json"
                     
-                    json_file = self._save_nodegroup_config(ng, alignment, output_file, formatter)
+                    json_file = self._save_nodegroup_config(ng, alignment, output_file, formatter, args.profile, cluster_region)
                     if json_file:
                         saved_files.append((json_file, ng, alignment))
                 
@@ -755,13 +758,35 @@ class AlignCommand:
         return merged_config
     
     def _save_nodegroup_config(self, ng: NodegroupInfo, alignment: DriverAlignment, 
-                              output_file: str, formatter: OutputFormatter) -> Optional[str]:
+                              output_file: str, formatter: OutputFormatter,
+                              aws_profile: str = None, aws_region: str = None) -> Optional[str]:
         """Save single nodegroup configuration to AWS CLI compatible JSON file."""
         try:
             import json
             
             # AWS CLI compatible configuration
             aws_config = alignment.nodegroup_config.copy()
+            
+            # Get the actual AMI release version from AWS SSM/EC2
+            try:
+                # Initialize EKS client to get actual release version
+                eks_client = EKSClient(
+                    profile=aws_profile,
+                    region=aws_region,
+                    verbose=False
+                )
+                
+                actual_release_version, ami_id = eks_client.get_actual_ami_release_version(
+                    alignment.k8s_version, 
+                    aws_config.get("amiType")
+                )
+                
+                formatter.print_status(f"Using actual AMI release version: {actual_release_version}", 'info')
+                
+            except Exception as e:
+                formatter.print_status(f"Warning: Could not get actual AMI release version: {e}", 'warning')
+                formatter.print_status(f"Using alignment release version: {alignment.release_tag}", 'info')
+                actual_release_version = alignment.release_tag
             
             # AWS CLI compatible configuration with proper release version
             aws_cli_config = {
@@ -770,7 +795,7 @@ class AlignCommand:
                 "scalingConfig": aws_config.get("scalingConfig", {}),
                 "instanceTypes": aws_config.get("instanceTypes", []),
                 "amiType": aws_config.get("amiType"),
-                "releaseVersion": alignment.release_tag,  # Proper AWS EKS release version format
+                "releaseVersion": actual_release_version,  # Actual AWS EKS release version
                 "nodeRole": aws_config.get("nodeRole"),
                 "subnets": aws_config.get("subnets", []),
                 "capacityType": aws_config.get("capacityType", "ON_DEMAND"),
