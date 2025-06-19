@@ -595,32 +595,6 @@ eks-nvidia-tools align \
     --output-file arm64-nodegroup-config.json
 ```
 
-### Technical Details: AMI Version Resolution
-
-The extraction mode uses AWS SSM parameters to get actual AMI versions, ensuring compatibility with your specific region:
-
-```bash
-# Example SSM parameter queries (automatically handled by the tool):
-
-# For AL2023 NVIDIA x86_64:
-aws ssm get-parameter \
-  --name /aws/service/eks/optimized-ami/1.32/amazon-linux-2023/x86_64/nvidia/recommended/image_id \
-  --region eu-west-1
-
-# For AL2023 NVIDIA ARM64:
-aws ssm get-parameter \
-  --name /aws/service/eks/optimized-ami/1.32/amazon-linux-2023/arm64/nvidia/recommended/image_id \
-  --region us-west-2
-
-# For AL2 GPU (legacy):
-aws ssm get-parameter \
-  --name /aws/service/eks/optimized-ami/1.31/amazon-linux-2-gpu/recommended/image_id \
-  --region eu-central-1
-
-# The tool then queries the AMI description to extract the full K8s version:
-# "EKS Kubernetes Worker AMI... (k8s: 1.32.3, containerd: 1.7.*)"
-# Result: releaseVersion: "1.32.3-20250610"
-```
 
 ### Example 3: Existing Cluster Migration with Extraction Mode
 
