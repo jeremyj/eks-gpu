@@ -379,21 +379,31 @@ class EKSClient:
             e.g., ("1.31.2-20250610", "ami-043fbfde365cd962d")
         """
         try:
-            # Map AMI types to SSM parameter path components
+            # Map AMI types to SSM parameter paths according to AWS documentation
+            # Reference: https://docs.aws.amazon.com/eks/latest/userguide/retrieve-ami-id.html
             ami_type_mapping = {
-                'AL2023_x86_64_NVIDIA': ('amazon-linux-2023', 'x86_64', 'nvidia'),
-                'AL2_x86_64_GPU': ('amazon-linux-2', 'x86_64', 'gpu'),
-                'AL2023_ARM_64_NVIDIA': ('amazon-linux-2023', 'arm64', 'nvidia')
+                # AL2023 NVIDIA variants
+                'AL2023_x86_64_NVIDIA': 'amazon-linux-2023/x86_64/nvidia',
+                'AL2023_ARM_64_NVIDIA': 'amazon-linux-2023/arm64/nvidia',
+                
+                # AL2 GPU variant (legacy)
+                'AL2_x86_64_GPU': 'amazon-linux-2-gpu',
+                
+                # AL2023 standard variants (for completeness)
+                'AL2023_x86_64_STANDARD': 'amazon-linux-2023/x86_64/standard',
+                'AL2023_ARM_64_STANDARD': 'amazon-linux-2023/arm64/standard',
+                
+                # AL2 standard variants (for completeness)
+                'AL2_x86_64': 'amazon-linux-2',
+                'AL2_ARM_64': 'amazon-linux-2-arm64'
             }
             
-            path_components = ami_type_mapping.get(ami_type)
-            if not path_components:
-                raise EKSClientError(f"Unknown AMI type: {ami_type}")
-            
-            base_os, architecture, gpu_type = path_components
+            ami_path = ami_type_mapping.get(ami_type)
+            if not ami_path:
+                raise EKSClientError(f"Unknown AMI type: {ami_type}. Supported types: {list(ami_type_mapping.keys())}")
             
             # Construct SSM parameter name with correct format
-            parameter_name = f"/aws/service/eks/optimized-ami/{k8s_version}/{base_os}/{architecture}/{gpu_type}/recommended/image_id"
+            parameter_name = f"/aws/service/eks/optimized-ami/{k8s_version}/{ami_path}/recommended/image_id"
             
             self.log(f"Getting AMI ID from SSM parameter: {parameter_name}")
             
