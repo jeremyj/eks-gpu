@@ -7,10 +7,14 @@ This command provides driver alignment functionality using the refactored models
 import argparse
 import os
 import sys
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 # Import the existing alignment classes
-from eks_nvidia_alignment import DriverAlignmentOrchestrator, DriverAlignment
+from eks_nvidia_alignment import DriverAlignmentOrchestrator
+from models.driver_alignment import DriverAlignment
+from core.eks_client import EKSClient, EKSClientError, NodegroupInfo
+from core.ami_resolver import EKSAMIResolver
+from models.ami_types import AMIType, AMITypeManager
 
 from ..shared.arguments import (
     add_architecture_args, add_kubernetes_args, add_output_args, 
@@ -32,7 +36,7 @@ class AlignCommand:
         parser = subparsers.add_parser(
             'align',
             help='Align NVIDIA drivers between EKS AMIs and container images',
-            description='Align NVIDIA drivers between EKS nodegroup AMIs and container images using two strategies: ami-first or container-first.'
+            description='Align NVIDIA drivers between EKS nodegroup AMIs and container images using ami-first or container-first strategies. Use --extract-from-cluster to apply strategies to existing nodegroups.'
         )
         
         # Strategy selection
@@ -49,12 +53,33 @@ class AlignCommand:
         add_cluster_args(target_group)
         add_kubernetes_args(target_group)
         add_architecture_args(target_group)
+        target_group.add_argument(
+            '--extract-from-cluster',
+            help='Extract nodegroup configurations from existing cluster and apply strategy to each'
+        )
         
         # Container-first specific options
         container_group = parser.add_argument_group('Container-First Options')
         container_group.add_argument(
             '--current-driver-version',
             help='Current container driver version (required for container-first strategy)'
+        )
+        
+        # Extraction mode options
+        extract_group = parser.add_argument_group('Extraction Mode Options')
+        extract_group.add_argument(
+            '--extract-nodegroups',
+            nargs='+',
+            help='Specific nodegroup names to extract (defaults to all GPU nodegroups)'
+        )
+        extract_group.add_argument(
+            '--target-cluster',
+            help='Target cluster name for generated nodegroup configurations (defaults to source cluster)'
+        )
+        extract_group.add_argument(
+            '--new-nodegroup-suffix',
+            default=None,
+            help='Suffix to add to generated nodegroup names (default: timestamp in format -YYYY-MM-DDTHH-MM-SS)'
         )
         
         # Nodegroup configuration
@@ -179,7 +204,11 @@ class AlignCommand:
             # Initialize orchestrator
             orchestrator = DriverAlignmentOrchestrator(config)
             
-            # Execute alignment strategy
+            # Check if we're in extraction mode
+            if args.extract_from_cluster:
+                return self._execute_extraction_mode(args, architecture, formatter)
+            
+            # Execute alignment strategy (non-extraction mode)
             print_separator(f"Driver Alignment - {args.strategy.title()} Strategy", not args.quiet)
             
             if args.strategy == 'ami-first':
@@ -243,13 +272,30 @@ class AlignCommand:
                 formatter.print_status(str(e), 'error')
                 return 1
         
-        # Either cluster-name OR k8s-version must be provided
-        if not args.cluster_name and not args.k8s_version:
-            formatter.print_status(
-                "Either --cluster-name (for auto-detection) or --k8s-version (manual) is required",
-                'error'
-            )
-            return 1
+        # Validate extraction mode
+        if args.extract_from_cluster:
+            # Validate extract-from-cluster name
+            try:
+                validate_cluster_name(args.extract_from_cluster)
+            except ValidationError as e:
+                formatter.print_status(str(e), 'error')
+                return 1
+            
+            # Validate target cluster if provided
+            if args.target_cluster:
+                try:
+                    validate_cluster_name(args.target_cluster)
+                except ValidationError as e:
+                    formatter.print_status(str(e), 'error')
+                    return 1
+        else:
+            # Non-extraction mode: Either cluster-name OR k8s-version must be provided
+            if not args.cluster_name and not args.k8s_version:
+                formatter.print_status(
+                    "Either --cluster-name (for auto-detection) or --k8s-version (manual) is required",
+                    'error'
+                )
+                return 1
         
         # Validate strategy-specific arguments
         if args.strategy == 'container-first':
@@ -266,37 +312,38 @@ class AlignCommand:
                 formatter.print_status(str(e), 'error')
                 return 1
         
-        # Validate template requirements
-        template_will_provide = (
-            (args.template and os.path.exists(args.template)) or
-            os.path.exists("nodegroup_template.json")
-        )
-        
-        if not template_will_provide:
-            required_params = {
-                'nodegroup_name': args.nodegroup_name,
-                'node_role_arn': args.node_role_arn,
-                'subnet_ids': args.subnet_ids
-            }
+        # Validate template requirements (only for non-extraction mode)
+        if not args.extract_from_cluster:
+            template_will_provide = (
+                (args.template and os.path.exists(args.template)) or
+                os.path.exists("nodegroup_template.json")
+            )
             
-            missing_required = []
-            for param_name, param_value in required_params.items():
-                if not param_value:
-                    cli_arg = f"--{param_name.replace('_', '-')}"
-                    missing_required.append(cli_arg)
-            
-            if missing_required:
-                formatter.print_status(
-                    "No template file found and missing required arguments:",
-                    'error'
-                )
-                for field in missing_required:
-                    formatter.print_status(f"  {field}", 'error')
-                formatter.print_status(
-                    "Either generate a template with 'eks-nvidia-tools align --generate-template' or provide required arguments",
-                    'info'
-                )
-                return 1
+            if not template_will_provide:
+                required_params = {
+                    'nodegroup_name': args.nodegroup_name,
+                    'node_role_arn': args.node_role_arn,
+                    'subnet_ids': args.subnet_ids
+                }
+                
+                missing_required = []
+                for param_name, param_value in required_params.items():
+                    if not param_value:
+                        cli_arg = f"--{param_name.replace('_', '-')}"
+                        missing_required.append(cli_arg)
+                
+                if missing_required:
+                    formatter.print_status(
+                        "No template file found and missing required arguments:",
+                        'error'
+                    )
+                    for field in missing_required:
+                        formatter.print_status(f"  {field}", 'error')
+                    formatter.print_status(
+                        "Either generate a template with 'eks-nvidia-tools align --generate-template' or provide required arguments",
+                        'info'
+                    )
+                    return 1
         
         return 0
     
@@ -501,3 +548,367 @@ class AlignCommand:
         except Exception as e:
             formatter.print_status(f"Alignment execution failed: {e}", 'error')
             return 1
+    
+    # Old extract-and-recreate method removed - functionality moved to extraction mode
+
+    def _execute_extraction_mode(self, args: argparse.Namespace, architecture: str,
+                                formatter: OutputFormatter) -> int:
+        """Execute extraction mode with the chosen strategy."""
+        try:
+            # Initialize EKS client and orchestrator
+            eks_client = EKSClient(
+                profile=args.profile,
+                region=args.region,
+                verbose=args.verbose
+            )
+            
+            config = {
+                'aws_profile': args.profile,
+                'aws_region': args.region,
+                'ubuntu_version': args.ubuntu_version,
+                'architecture': architecture,
+                'debug': args.verbose,
+            }
+            orchestrator = DriverAlignmentOrchestrator(config)
+            
+            source_cluster = args.extract_from_cluster
+            target_cluster = args.target_cluster or source_cluster
+            
+            # Generate timestamp suffix if none provided
+            if args.new_nodegroup_suffix is None:
+                from datetime import datetime
+                timestamp = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
+                nodegroup_suffix = f'-{timestamp}'
+            else:
+                nodegroup_suffix = args.new_nodegroup_suffix
+            
+            print_separator(f"Extraction Mode - {args.strategy.title()} Strategy", not args.quiet)
+            
+            print_step(1, 4, f"Validating cluster access", not args.quiet)
+            
+            # Validate source cluster access
+            with progress(f"Validating access to cluster '{source_cluster}'", not args.quiet):
+                is_valid, message = eks_client.validate_cluster_access(source_cluster)
+                if not is_valid:
+                    formatter.print_status(message, 'error')
+                    return 1
+                formatter.print_status(message, 'success')
+            
+            print_step(2, 4, "Extracting nodegroup configurations", not args.quiet)
+            
+            # Extract nodegroup configurations
+            with progress("Extracting nodegroup configurations", not args.quiet):
+                nodegroups = eks_client.extract_nodegroup_configurations(
+                    source_cluster, args.extract_nodegroups
+                )
+            
+            if not nodegroups:
+                formatter.print_status("No GPU nodegroups found to extract", 'warning')
+                return 1
+            
+            formatter.print_status(f"Extracted {len(nodegroups)} nodegroup configuration(s)", 'success')
+            
+            # Show extracted nodegroups
+            self._display_extracted_nodegroups(nodegroups, formatter)
+            
+            print_step(3, 4, f"Applying {args.strategy} strategy to each nodegroup", not args.quiet)
+            
+            # Apply strategy to each extracted nodegroup
+            all_alignments = []
+            failed_alignments = []
+            
+            for i, ng in enumerate(nodegroups):
+                print(f"\nProcessing nodegroup {i+1}/{len(nodegroups)}: {ng.nodegroup_name}")
+                
+                try:
+                    if args.strategy == 'ami-first':
+                        alignment = self._apply_ami_first_to_nodegroup(
+                            orchestrator, ng, args, architecture, nodegroup_suffix, target_cluster, formatter
+                        )
+                    else:  # container-first
+                        alignment = self._apply_container_first_to_nodegroup(
+                            orchestrator, ng, args, architecture, nodegroup_suffix, target_cluster, formatter
+                        )
+                    
+                    if alignment:
+                        all_alignments.append((ng, alignment))
+                    else:
+                        failed_alignments.append(ng.nodegroup_name)
+                        
+                except Exception as e:
+                    formatter.print_status(f"Failed to process {ng.nodegroup_name}: {e}", 'error')
+                    failed_alignments.append(ng.nodegroup_name)
+            
+            print_step(4, 4, "Generating aligned configurations", not args.quiet)
+            
+            # Save all alignments to file
+            if all_alignments:
+                # Generate separate JSON file for each nodegroup using new nodegroup name
+                saved_files = []
+                for ng, alignment in all_alignments:
+                    new_nodegroup_name = alignment.nodegroup_config['nodegroupName']
+                    output_file = args.output_file or f"{new_nodegroup_name}.json"
+                    
+                    json_file = self._save_nodegroup_config(ng, alignment, output_file, formatter)
+                    if json_file:
+                        saved_files.append((json_file, ng, alignment))
+                
+                # Display next steps
+                if saved_files:
+                    self._display_extraction_next_steps(saved_files, formatter)
+            
+            # Summary
+            formatter.print_status(f"Successfully processed {len(all_alignments)} nodegroup(s)", 'success')
+            if failed_alignments:
+                formatter.print_status(f"Failed to process {len(failed_alignments)} nodegroup(s): {', '.join(failed_alignments)}", 'error')
+            
+            return 0 if not failed_alignments else 1
+            
+        except Exception as e:
+            formatter.print_status(f"Extraction mode failed: {e}", 'error')
+            if args.verbose:
+                import traceback
+                traceback.print_exc()
+            return 1
+    
+    def _apply_ami_first_to_nodegroup(self, orchestrator, ng: NodegroupInfo, 
+                                     args: argparse.Namespace, architecture: str,
+                                     nodegroup_suffix: str, target_cluster: str,
+                                     formatter: OutputFormatter):
+        """Apply ami-first strategy to a single extracted nodegroup."""
+        try:
+            # Get cluster info to determine K8s version if not provided
+            if args.k8s_version:
+                k8s_version = args.k8s_version
+            else:
+                # Extract K8s version from the cluster
+                k8s_version = ng.version or "1.32"  # fallback
+            
+            # Execute ami-first alignment
+            alignment = orchestrator.align_drivers_ami_first(
+                k8s_version=k8s_version,
+                architecture=architecture,
+                cluster_name=None  # We're not using cluster auto-detection
+            )
+            
+            if alignment:
+                # Update the alignment with extracted nodegroup info
+                alignment.nodegroup_config = self._merge_extracted_config(
+                    ng, alignment.nodegroup_config, nodegroup_suffix, target_cluster
+                )
+                
+            return alignment
+            
+        except Exception as e:
+            formatter.print_status(f"Failed ami-first for {ng.nodegroup_name}: {e}", 'error')
+            return None
+    
+    def _apply_container_first_to_nodegroup(self, orchestrator, ng: NodegroupInfo,
+                                           args: argparse.Namespace, architecture: str,
+                                           nodegroup_suffix: str, target_cluster: str,
+                                           formatter: OutputFormatter):
+        """Apply container-first strategy to a single extracted nodegroup."""
+        try:
+            # Get cluster info to determine K8s version if not provided
+            if args.k8s_version:
+                k8s_version = args.k8s_version
+            else:
+                # Extract K8s version from the cluster
+                k8s_version = ng.version or "1.32"  # fallback
+            
+            # Execute container-first alignment
+            alignment = orchestrator.align_drivers_container_first(
+                current_driver_version=args.current_driver_version,
+                architecture=architecture,
+                k8s_version=k8s_version,
+                cluster_name=None  # We're not using cluster auto-detection
+            )
+            
+            if alignment:
+                # Update the alignment with extracted nodegroup info
+                alignment.nodegroup_config = self._merge_extracted_config(
+                    ng, alignment.nodegroup_config, nodegroup_suffix, target_cluster
+                )
+            
+            return alignment
+            
+        except Exception as e:
+            formatter.print_status(f"Failed container-first for {ng.nodegroup_name}: {e}", 'error')
+            return None
+    
+    def _merge_extracted_config(self, ng: NodegroupInfo, alignment_config: Dict[str, Any],
+                               nodegroup_suffix: str, target_cluster: str) -> Dict[str, Any]:
+        """Merge extracted nodegroup configuration with alignment results."""
+        # Start with the extracted nodegroup template
+        merged_config = ng.to_template_dict()
+        
+        # Update with alignment-specific settings
+        merged_config['clusterName'] = target_cluster
+        merged_config['nodegroupName'] = f"{ng.nodegroup_name}{nodegroup_suffix}"
+        
+        # Override with alignment config (AMI type, etc.)
+        if 'ami_type' in alignment_config:
+            merged_config['amiType'] = alignment_config['ami_type']
+        if 'architecture' in alignment_config:
+            merged_config['architecture'] = alignment_config['architecture']
+        
+        return merged_config
+    
+    def _save_nodegroup_config(self, ng: NodegroupInfo, alignment: DriverAlignment, 
+                              output_file: str, formatter: OutputFormatter) -> Optional[str]:
+        """Save single nodegroup configuration to AWS CLI compatible JSON file."""
+        try:
+            import json
+            
+            # AWS CLI compatible configuration
+            aws_config = alignment.nodegroup_config.copy()
+            
+            # AWS CLI compatible configuration with proper release version
+            aws_cli_config = {
+                "clusterName": aws_config.get("clusterName"),
+                "nodegroupName": aws_config.get("nodegroupName"),
+                "scalingConfig": aws_config.get("scalingConfig", {}),
+                "instanceTypes": aws_config.get("instanceTypes", []),
+                "amiType": aws_config.get("amiType"),
+                "releaseVersion": alignment.release_tag,  # Proper AWS EKS release version format
+                "nodeRole": aws_config.get("nodeRole"),
+                "subnets": aws_config.get("subnets", []),
+                "capacityType": aws_config.get("capacityType", "ON_DEMAND"),
+                "diskSize": aws_config.get("diskSize", 50),
+                "labels": aws_config.get("labels", {}),
+                "taints": aws_config.get("taints", []),
+                "tags": aws_config.get("tags", {})
+            }
+            
+            # Add optional fields if present
+            if aws_config.get("updateConfig"):
+                aws_cli_config["updateConfig"] = aws_config["updateConfig"]
+            if aws_config.get("launchTemplate"):
+                aws_cli_config["launchTemplate"] = aws_config["launchTemplate"]
+            if aws_config.get("remoteAccess"):
+                aws_cli_config["remoteAccess"] = aws_config["remoteAccess"]
+            
+            # Save single nodegroup configuration
+            with open(output_file, 'w') as f:
+                json.dump(aws_cli_config, f, indent=2)
+            
+            formatter.print_status(f"Configuration saved to: {output_file}", 'success')
+            return output_file
+            
+        except Exception as e:
+            formatter.print_status(f"Warning: Failed to save {output_file}: {e}", 'warning')
+            return None
+    
+    def _display_extraction_next_steps(self, saved_files: List[tuple], formatter: OutputFormatter) -> None:
+        """Display next steps for extraction results."""
+        formatter.print_status("Generated Files:", 'info')
+        for json_file, ng, alignment in saved_files:
+            print(f"  📄 {json_file}")
+        print()
+        
+        formatter.print_status("Next Steps:", 'info')
+        print("1. Review and modify configurations if needed:")
+        for json_file, ng, alignment in saved_files:
+            config = alignment.nodegroup_config
+            release_version = alignment.release_tag
+            ami_type = config.get('amiType', 'N/A')
+            print(f"   • {json_file}")
+            print(f"     - Release: {release_version} | AMI Type: {ami_type}")
+            print(f"     - Original: {ng.nodegroup_name} → New: {config['nodegroupName']}")
+        print()
+        
+        print("2. Create nodegroups using AWS CLI:")
+        for json_file, ng, alignment in saved_files:
+            config = alignment.nodegroup_config
+            new_name = config['nodegroupName']
+            cluster_name = config['clusterName']
+            
+            print(f"   # Create {new_name}")
+            print(f"   aws eks create-nodegroup --cli-input-json file://{json_file}")
+            print()
+        
+        print("3. To modify driver versions or releases:")
+        print("   • Edit the JSON files to change:")
+        print("     - releaseVersion: Change AMI release (e.g., '1.31-20250519' → '1.31-20250403')")
+        print("     - amiType: Change AMI type (AL2023_x86_64_NVIDIA, AL2_x86_64_GPU, etc.)")
+        print("   • Re-run alignment with --current-driver-version for different strategy")
+        print()
+        
+        print("4. After verifying new nodegroups work correctly:")
+        print("   • Drain and delete original nodegroups manually")
+        print("   • Update applications to use new nodegroups if needed")
+        print()
+        
+        formatter.print_status("⚠ This tool generates configurations only - you must create nodegroups manually", 'warning')
+    
+    def _display_extracted_nodegroups(self, nodegroups: List[NodegroupInfo], 
+                                     formatter: OutputFormatter) -> None:
+        """Display extracted nodegroup information."""
+        formatter.print_status("Extracted GPU Nodegroups:", 'info')
+        
+        for ng in nodegroups:
+            status_icon = "⚠" if ng.ami_type == 'AL2_x86_64_GPU' else "✓"
+            arch_display = ng.architecture.upper() if ng.architecture == "arm64" else "x86_64"
+            
+            print(f"  {status_icon} {ng.nodegroup_name}")
+            print(f"    AMI Type: {ng.ami_type}")
+            print(f"    Architecture: {arch_display}")
+            print(f"    Instance Types: {', '.join(ng.instance_types)}")
+            print(f"    Status: {ng.status}")
+            
+            if ng.ami_type == 'AL2_x86_64_GPU':
+                print(f"    ⚠ Warning: Uses deprecated AL2 AMI (EOL: 2024-11-26)")
+            print()
+    
+    
+    def _save_aligned_configurations(self, aligned_configs: List[tuple], 
+                                   output_file: str, formatter: OutputFormatter) -> None:
+        """Save aligned configurations to file."""
+        try:
+            import json
+            configurations = [config for _, config in aligned_configs]
+            
+            with open(output_file, 'w') as f:
+                json.dump(configurations, f, indent=2)
+            
+            formatter.print_status(f"Aligned configurations saved to: {output_file}", 'info')
+            
+        except Exception as e:
+            formatter.print_status(f"Warning: Failed to save configurations: {e}", 'warning')
+    
+    def _display_next_steps(self, validated_configs: List[tuple], 
+                           output_file: str, formatter: OutputFormatter) -> None:
+        """Display next steps for using the generated configurations."""
+        formatter.print_status("Next Steps:", 'info')
+        
+        print(f"1. Review the generated configurations in: {output_file}")
+        print("2. Create nodegroups using AWS CLI or Console:")
+        print()
+        
+        for original_ng, aligned_config in validated_configs:
+            new_name = aligned_config['nodegroupName']
+            cluster_name = aligned_config['clusterName']
+            
+            print(f"   # Create {new_name}")
+            print(f"   aws eks create-nodegroup \\")
+            print(f"     --cluster-name {cluster_name} \\")
+            print(f"     --nodegroup-name {new_name} \\")
+            print(f"     --node-role {aligned_config['nodeRole']} \\")
+            print(f"     --subnets {' '.join(aligned_config['subnets'])} \\")
+            print(f"     --instance-types {' '.join(aligned_config['instanceTypes'])} \\")
+            print(f"     --ami-type {aligned_config['amiType']} \\")
+            print(f"     --capacity-type {aligned_config['capacityType']} \\")
+            print(f"     --disk-size {aligned_config['diskSize']} \\")
+            print(f"     --scaling-config minSize={aligned_config['scalingConfig']['minSize']},maxSize={aligned_config['scalingConfig']['maxSize']},desiredSize={aligned_config['scalingConfig']['desiredSize']}")
+            
+            if aligned_config.get('labels'):
+                labels_str = ','.join([f"{k}={v}" for k, v in aligned_config['labels'].items()])
+                print(f"     --labels {labels_str} \\")
+            
+            print()
+        
+        print("3. After verifying the new nodegroups work correctly:")
+        print("   - Drain and delete the original nodegroups manually")
+        print("   - Update your applications to use the new nodegroups if needed")
+        print()
+        print("⚠ This tool only generates configurations - you must create the nodegroups manually")
