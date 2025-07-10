@@ -72,24 +72,62 @@ show_help() {
     echo "  $0 --force           # Force reinstall"
 }
 
-# Function to get version from a script
+# Function to extract version from Python __init__.py file
+extract_version_from_source() {
+    local base_path="$1"
+    local init_file="$base_path/eks_nvidia_tools/__init__.py"
+    
+    if [[ -f "$init_file" ]]; then
+        # Extract version from __version__ = "x.y.z" line
+        local version
+        version=$(grep -E '^__version__[[:space:]]*=[[:space:]]*["\x27]' "$init_file" | sed -E 's/^__version__[[:space:]]*=[[:space:]]*["\x27]([^"\x27]+)["\x27].*/\1/')
+        if [[ -n "$version" ]]; then
+            echo "v$version"
+            return 0
+        fi
+    fi
+    
+    echo "unknown"
+    return 1
+}
+
+# Function to get version from a script (with fallback to source parsing)
 get_version() {
     local script_path="$1"
+    
+    # First try to extract from source code (works without dependencies)
+    local script_dir="$(dirname "$script_path")"
+    local version
+    version=$(extract_version_from_source "$script_dir")
+    if [[ "$version" != "unknown" ]]; then
+        echo "$version"
+        return 0
+    fi
+    
+    # Fallback: try to execute script if it exists and is executable
     if [[ -x "$script_path" ]]; then
-        # Try to get version, suppress errors
         local version_output
-        version_output=$("$script_path" version 2>/dev/null | head -1 | grep -o "v[0-9.]*" || echo "unknown")
+        version_output=$("$script_path" version 2>/dev/null | head -1 | grep -o "v[0-9.]*" 2>/dev/null || echo "unknown")
         echo "$version_output"
     else
         echo "not_found"
     fi
 }
 
-# Function to get current source version
+# Function to get current source version (with source code parsing)
 get_source_version() {
+    # Try to extract from source code first (doesn't require execution)
+    local version
+    version=$(extract_version_from_source ".")
+    if [[ "$version" != "unknown" ]]; then
+        echo "$version"
+        return 0
+    fi
+    
+    # Fallback: try to execute script if available
     if [[ -x "$SOURCE_SCRIPT" ]]; then
         local version_output
-        version_output=$("$SOURCE_SCRIPT" version 2>/dev/null | head -1 | grep -o "v[0-9.]*" || echo "unknown")
+        version_output=$("$SOURCE_SCRIPT" version 2>/dev/null | head -1 | grep -o "v[0-9.]*" 2>/dev/null || echo "unknown")
         echo "$version_output"
     else
         echo "unknown"
