@@ -63,7 +63,7 @@ class VersionCommand:
             from eks_nvidia_tools import __version__, __author__
         except ImportError:
             __version__ = "development"
-            __author__ = "Jeremy J. Rossi and Claude Code"
+            __author__ = "Jeremy J. Rossi"
         
         version_info = {
             "eks_nvidia_tools": {
