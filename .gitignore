@@ -198,6 +198,9 @@ outputs/
 logs/
 cache/
 
+# Local environment configuration
+.env
+
 # Allow templates folder JSON files
 *.json
 !templates/*.json

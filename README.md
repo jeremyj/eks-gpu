@@ -111,7 +111,7 @@ python -m eks_nvidia_tools.cli.main <command> [options]
 - **Update management**: Shows upgrade/downgrade status with version comparison  
 - **Conflict resolution**: Warns about PATH conflicts between multiple installations
 - **Automatic backups**: Creates timestamped backups before overwriting existing versions
-- **Virtualenv integration**: Uses `/home/user/venv` Python environment automatically
+- **Python environment integration**: Configurable to use specific Python environments
 - **Project auto-discovery**: Finds project directory regardless of installation location
 
 #### Enhanced Installation Options
@@ -129,6 +129,26 @@ sudo ./install.sh --global
 # Get help with all options
 ./install.sh --help
 ```
+
+#### Python Environment Configuration
+
+The wrapper script supports flexible Python environment configuration:
+
+```bash
+# Configure via environment variables
+export EKS_NVIDIA_TOOLS_VENV=/path/to/your/virtualenv
+export EKS_NVIDIA_TOOLS_PYTHON=/path/to/python
+
+# Or create a local .env file (copy from .env.example)
+cp .env.example .env
+# Edit .env with your environment paths
+```
+
+**Auto-detection priority:**
+1. `EKS_NVIDIA_TOOLS_PYTHON` environment variable
+2. `EKS_NVIDIA_TOOLS_VENV/bin/python` if virtualenv is specified
+3. Currently active `$VIRTUAL_ENV/bin/python`
+4. System `python3` executable
 
 ### AWS Permissions
 

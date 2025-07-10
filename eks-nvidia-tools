@@ -3,14 +3,14 @@
 # EKS NVIDIA Tools - Wrapper Script
 #
 # This script provides a convenient wrapper for the eks-nvidia-tools CLI,
-# using the virtualenv at /home/user/venv and automatically locating
-# the project directory.
+# with configurable Python environment and automatic project directory discovery.
 #
 # Usage:
 #    eks-nvidia-tools <command> [options]
 #
-# Instead of:
-#    /home/user/venv/bin/python -m eks_nvidia_tools.cli.main <command> [options]
+# Environment Variables:
+#    EKS_NVIDIA_TOOLS_PYTHON   - Path to Python executable (default: python3)
+#    EKS_NVIDIA_TOOLS_VENV     - Path to virtual environment directory
 #
 # Examples:
 #    eks-nvidia-tools parse --k8s-version 1.32
@@ -19,9 +19,23 @@
 #    eks-nvidia-tools version --verbose
 #
 
-# Configuration
-VENV_PATH="/home/user/venv"
-PYTHON_EXECUTABLE="$VENV_PATH/bin/python"
+# Configuration - can be overridden by environment variables
+DEFAULT_PYTHON="python3"
+VENV_PATH="${EKS_NVIDIA_TOOLS_VENV:-}"
+PYTHON_EXECUTABLE="${EKS_NVIDIA_TOOLS_PYTHON:-}"
+
+# Auto-detect Python executable
+if [[ -z "$PYTHON_EXECUTABLE" ]]; then
+    if [[ -n "$VENV_PATH" && -f "$VENV_PATH/bin/python" ]]; then
+        PYTHON_EXECUTABLE="$VENV_PATH/bin/python"
+    elif [[ -n "$VIRTUAL_ENV" && -f "$VIRTUAL_ENV/bin/python" ]]; then
+        # Use currently active virtual environment
+        PYTHON_EXECUTABLE="$VIRTUAL_ENV/bin/python"
+    else
+        # Fall back to system Python
+        PYTHON_EXECUTABLE="$DEFAULT_PYTHON"
+    fi
+fi
 
 # Function to find the project directory
 find_project_dir() {
@@ -46,7 +60,6 @@ find_project_dir() {
     
     # Fallback: try some common locations
     local common_paths=(
-        "/home/user/repos/project/eks-gpu"
         "$(dirname "$script_path")"
         "$(pwd)"
     )
@@ -61,15 +74,16 @@ find_project_dir() {
     return 1
 }
 
-# Function to check if virtualenv exists and is valid
-check_virtualenv() {
-    if [[ ! -f "$PYTHON_EXECUTABLE" ]]; then
-        echo "Error: Python executable not found at $PYTHON_EXECUTABLE" >&2
-        echo "Please ensure the virtualenv exists at $VENV_PATH" >&2
+# Function to check if Python executable exists and is valid
+check_python() {
+    if [[ ! -f "$PYTHON_EXECUTABLE" ]] && ! command -v "$PYTHON_EXECUTABLE" >/dev/null 2>&1; then
+        echo "Error: Python executable not found: $PYTHON_EXECUTABLE" >&2
+        echo "Please ensure Python is installed or set EKS_NVIDIA_TOOLS_PYTHON environment variable" >&2
         return 1
     fi
     
-    if [[ ! -x "$PYTHON_EXECUTABLE" ]]; then
+    # Check if it's executable
+    if [[ -f "$PYTHON_EXECUTABLE" && ! -x "$PYTHON_EXECUTABLE" ]]; then
         echo "Error: Python executable is not executable: $PYTHON_EXECUTABLE" >&2
         return 1
     fi
@@ -92,9 +106,13 @@ except ImportError as e:
     print(f'Missing dependencies: {e}')
     sys.exit(1)
 " >/dev/null 2>&1; then
-        echo "Error: Required Python dependencies are not installed in the virtualenv." >&2
-        echo "Please install dependencies in the virtualenv:" >&2
-        echo "  $VENV_PATH/bin/pip install beautifulsoup4 tabulate pyyaml requests" >&2
+        echo "Error: Required Python dependencies are not installed." >&2
+        echo "Please install dependencies:" >&2
+        echo "  pip install beautifulsoup4 tabulate pyyaml requests" >&2
+        if [[ -n "$VENV_PATH" ]]; then
+            echo "Or with virtual environment:" >&2
+            echo "  $VENV_PATH/bin/pip install beautifulsoup4 tabulate pyyaml requests" >&2
+        fi
         return 1
     fi
     
@@ -103,8 +121,8 @@ except ImportError as e:
 
 # Main execution
 main() {
-    # Check virtualenv
-    if ! check_virtualenv; then
+    # Check Python executable
+    if ! check_python; then
         exit 1
     fi
     
@@ -121,7 +139,7 @@ main() {
         exit 1
     fi
     
-    # Execute the CLI with the virtualenv Python and proper project path
+    # Execute the CLI with the configured Python and proper project path
     cd "$project_dir" || exit 1
     exec "$PYTHON_EXECUTABLE" -m eks_nvidia_tools.cli.main "$@"
 }
