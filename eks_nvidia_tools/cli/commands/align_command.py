@@ -20,6 +20,7 @@ from ..shared.arguments import (
     add_architecture_args, add_kubernetes_args, add_output_args, 
     add_aws_args, add_cluster_args
 )
+from utils.path_utils import get_template_path, get_output_path, find_template_file
 from ..shared.output import OutputFormatter
 from ..shared.validation import (
     validate_k8s_version, validate_architecture, validate_cluster_name,
@@ -90,7 +91,7 @@ class AlignCommand:
         )
         nodegroup_group.add_argument(
             '--template',
-            help='Path to nodegroup template JSON file (default: nodegroup_template.json)'
+            help='Path to nodegroup template JSON file (default: templates/nodegroup_template.json)'
         )
         
         # Template overrides
@@ -158,7 +159,7 @@ class AlignCommand:
         execution_group.add_argument(
             '--generate-template',
             action='store_true',
-            help='Generate a sample nodegroup_template.json file and exit'
+            help='Generate a sample nodegroup template file and exit'
         )
         
         # Output options
@@ -316,7 +317,7 @@ class AlignCommand:
         if not args.extract_from_cluster:
             template_will_provide = (
                 (args.template and os.path.exists(args.template)) or
-                os.path.exists("nodegroup_template.json")
+                find_template_file() is not None
             )
             
             if not template_will_provide:
@@ -350,7 +351,7 @@ class AlignCommand:
     def _generate_template(self, args: argparse.Namespace, architecture: str,
                          formatter: OutputFormatter) -> int:
         """Generate a sample nodegroup template."""
-        template_filename = "nodegroup_template.json"
+        template_filename = get_template_path()
         
         # Check if file already exists
         if os.path.exists(template_filename):
@@ -656,7 +657,7 @@ class AlignCommand:
                         output_file = args.output_file
                     else:
                         # Use the new nodegroup name directly as filename (it already has the correct timestamp)
-                        output_file = f"{new_nodegroup_name}.json"
+                        output_file = get_output_path(f"{new_nodegroup_name}.json")
                     
                     json_file = self._save_nodegroup_config(ng, alignment, output_file, formatter, args.profile, cluster_region)
                     if json_file:

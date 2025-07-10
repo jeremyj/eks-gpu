@@ -15,6 +15,7 @@ from models.nodegroup_config import NodeGroupConfig
 from models.ami_types import Architecture
 
 from ..shared.arguments import add_architecture_args, add_output_args, add_aws_args
+from utils.path_utils import get_output_path
 from ..shared.output import OutputFormatter
 from ..shared.validation import (
     validate_architecture, validate_aws_region, validate_aws_profile, ValidationError
@@ -207,7 +208,7 @@ class TemplateCommand:
                 }
             
             # Output template
-            output_file = args.output_file or f"nodegroup-{architecture}.json"
+            output_file = args.output_file or get_output_path(f"nodegroup-{architecture}.json")
             
             with progress(f"Writing template to {output_file}", not args.quiet):
                 with open(output_file, 'w') as f:

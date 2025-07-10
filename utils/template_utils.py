@@ -8,6 +8,7 @@ from typing import Dict, Any, List, Optional, Tuple, Union
 from pathlib import Path
 from models.nodegroup_config import NodeGroupConfig
 from models.ami_types import Architecture
+from .path_utils import get_template_path, get_output_path, find_template_file
 
 
 class TemplateError(Exception):
@@ -211,8 +212,8 @@ class TemplateLoader:
     """Loader for various template formats and sources."""
     
     DEFAULT_TEMPLATE_PATHS = [
-        "nodegroup_template.json",
         "templates/nodegroup_template.json",
+        "nodegroup_template.json",  # backward compatibility
         "config/nodegroup_template.json"
     ]
     

@@ -173,7 +173,8 @@ class EKSNodegroupManager:
     def _get_default_nodegroup_template(self) -> Dict:
         """Return a default nodegroup template from file - no hardcoded fallback."""
         # Try to read from nodegroup_template.json
-        default_template_path = "nodegroup_template.json"
+        from utils.path_utils import find_template_file
+        default_template_path = find_template_file() or "templates/nodegroup_template.json"
         
         if os.path.exists(default_template_path):
             try:
@@ -518,7 +519,8 @@ class DriverAlignmentOrchestrator:
             
             # Output to file
             arch_suffix = f"-{alignment.architecture.value}" if alignment.architecture.value == "arm64" else ""
-            output_filename = output_file or f"nodegroup-{nodegroup_name}{arch_suffix}-config.json"
+            from utils.path_utils import get_output_path
+            output_filename = output_file or get_output_path(f"nodegroup-{nodegroup_name}{arch_suffix}-config.json")
             try:
                 with open(output_filename, 'w') as f:
                     json.dump(final_config, f, indent=2)
@@ -559,7 +561,8 @@ class DriverAlignmentOrchestrator:
             
             # Output to file
             arch_suffix = f"-{alignment.architecture.value}" if alignment.architecture.value == "arm64" else ""
-            output_filename = output_file or f"nodegroup-{nodegroup_name}{arch_suffix}-config.json"
+            from utils.path_utils import get_output_path
+            output_filename = output_file or get_output_path(f"nodegroup-{nodegroup_name}{arch_suffix}-config.json")
             try:
                 with open(output_filename, 'w') as f:
                     json.dump(final_config, f, indent=2)
@@ -703,7 +706,7 @@ def main():
     
     # All other arguments are optional overrides for the template
     parser.add_argument("--nodegroup-name", help="EKS nodegroup name (overrides template)")
-    parser.add_argument("--template", help="Path to nodegroup template JSON file (default: nodegroup_template.json)")
+    parser.add_argument("--template", help="Path to nodegroup template JSON file (default: templates/nodegroup_template.json)")
     parser.add_argument("--k8s-version", help="Kubernetes version (overrides auto-detection)")
     
     # Template overrides - these will be passed to the template
@@ -736,7 +739,7 @@ def main():
     parser.add_argument("--output-file", "-o", 
                        help="Output file for nodegroup configuration")
     parser.add_argument("--generate-template", action="store_true",
-                       help="Generate a sample nodegroup_template.json file and exit")
+                       help="Generate a sample nodegroup template file and exit")
     parser.add_argument("--debug", action="store_true", 
                        help="Enable detailed debug logging for driver resolution")
     
@@ -748,7 +751,8 @@ def main():
     
     # Handle template generation first
     if args.generate_template:
-        template_filename = "nodegroup_template.json"
+        from utils.path_utils import get_template_path
+        template_filename = get_template_path()
         
         # Check if file already exists
         if os.path.exists(template_filename):
@@ -933,7 +937,7 @@ def main():
     template_will_provide = False
     if args.template and os.path.exists(args.template):
         template_will_provide = True
-    elif os.path.exists("nodegroup_template.json"):
+    elif find_template_file():
         template_will_provide = True
     
     if not template_will_provide:
@@ -957,7 +961,7 @@ def main():
                 print(f"   {field}")
             print(f"\n💡 Either:")
             print(f"   1. Generate a template: python {os.path.basename(__file__)} --generate-template --architecture {args.architecture}")
-            print(f"   2. Create a nodegroup_template.json file with required configuration")
+            print(f"   2. Create a nodegroup template file with required configuration")
             print(f"   3. Provide a template file with --template")
             print(f"   4. Specify all required arguments above")
             sys.exit(1)
