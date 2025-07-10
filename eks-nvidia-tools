@@ -1,51 +1,130 @@
-#!/usr/bin/env python3
-"""
-EKS NVIDIA Tools - Wrapper Script
+#!/bin/bash
+#
+# EKS NVIDIA Tools - Wrapper Script
+#
+# This script provides a convenient wrapper for the eks-nvidia-tools CLI,
+# using the virtualenv at /home/user/venv and automatically locating
+# the project directory.
+#
+# Usage:
+#    eks-nvidia-tools <command> [options]
+#
+# Instead of:
+#    /home/user/venv/bin/python -m eks_nvidia_tools.cli.main <command> [options]
+#
+# Examples:
+#    eks-nvidia-tools parse --k8s-version 1.32
+#    eks-nvidia-tools align --strategy ami-first --cluster-name my-cluster
+#    eks-nvidia-tools template --generate --architecture arm64
+#    eks-nvidia-tools version --verbose
+#
 
-This script provides a convenient wrapper for the eks-nvidia-tools CLI,
-eliminating the need to type the full Python module path.
+# Configuration
+VENV_PATH="/home/user/venv"
+PYTHON_EXECUTABLE="$VENV_PATH/bin/python"
 
-Usage:
-    eks-nvidia-tools <command> [options]
+# Function to find the project directory
+find_project_dir() {
+    local script_path="$1"
+    local current_dir
+    
+    # If script_path is a symlink, resolve it
+    if [[ -L "$script_path" ]]; then
+        script_path=$(readlink -f "$script_path")
+    fi
+    
+    current_dir="$(dirname "$script_path")"
+    
+    # Look for eks_nvidia_tools directory starting from script location
+    while [[ "$current_dir" != "/" ]]; do
+        if [[ -d "$current_dir/eks_nvidia_tools" && -f "$current_dir/eks_nvidia_tools/cli/main.py" ]]; then
+            echo "$current_dir"
+            return 0
+        fi
+        current_dir="$(dirname "$current_dir")"
+    done
+    
+    # Fallback: try some common locations
+    local common_paths=(
+        "/home/user/repos/project/eks-gpu"
+        "$(dirname "$script_path")"
+        "$(pwd)"
+    )
+    
+    for path in "${common_paths[@]}"; do
+        if [[ -d "$path/eks_nvidia_tools" && -f "$path/eks_nvidia_tools/cli/main.py" ]]; then
+            echo "$path"
+            return 0
+        fi
+    done
+    
+    return 1
+}
 
-Instead of:
-    python -m eks_nvidia_tools.cli.main <command> [options]
+# Function to check if virtualenv exists and is valid
+check_virtualenv() {
+    if [[ ! -f "$PYTHON_EXECUTABLE" ]]; then
+        echo "Error: Python executable not found at $PYTHON_EXECUTABLE" >&2
+        echo "Please ensure the virtualenv exists at $VENV_PATH" >&2
+        return 1
+    fi
+    
+    if [[ ! -x "$PYTHON_EXECUTABLE" ]]; then
+        echo "Error: Python executable is not executable: $PYTHON_EXECUTABLE" >&2
+        return 1
+    fi
+    
+    return 0
+}
 
-Examples:
-    eks-nvidia-tools parse --k8s-version 1.32
-    eks-nvidia-tools align --strategy ami-first --cluster-name my-cluster
-    eks-nvidia-tools template --generate --architecture arm64
-    eks-nvidia-tools version --verbose
-"""
-
+# Function to check dependencies
+check_dependencies() {
+    local project_dir="$1"
+    
+    # Try to import the main module to check if dependencies are available
+    if ! "$PYTHON_EXECUTABLE" -c "
 import sys
-import os
-from pathlib import Path
-
-def main():
-    """Main wrapper function that delegates to the actual CLI."""
-    # Get the directory where this script is located
-    script_dir = Path(__file__).parent.absolute()
+sys.path.insert(0, '$project_dir')
+try:
+    import eks_nvidia_tools.cli.main
+    print('Dependencies OK')
+except ImportError as e:
+    print(f'Missing dependencies: {e}')
+    sys.exit(1)
+" >/dev/null 2>&1; then
+        echo "Error: Required Python dependencies are not installed in the virtualenv." >&2
+        echo "Please install dependencies in the virtualenv:" >&2
+        echo "  $VENV_PATH/bin/pip install beautifulsoup4 tabulate pyyaml requests" >&2
+        return 1
+    fi
     
-    # Add the script directory to Python path so we can import the module
-    if str(script_dir) not in sys.path:
-        sys.path.insert(0, str(script_dir))
-    
-    try:
-        # Import and run the actual CLI
-        from eks_nvidia_tools.cli.main import main as cli_main
-        sys.exit(cli_main())
-    except ImportError as e:
-        print(f"Error: Could not import eks_nvidia_tools module: {e}", file=sys.stderr)
-        print(f"Project directory: {script_dir}", file=sys.stderr)
-        print(f"Python path: {sys.path[:3]}...", file=sys.stderr)
-        print("", file=sys.stderr)
-        print("Make sure you have the required dependencies installed:", file=sys.stderr)
-        print("  pip install beautifulsoup4 tabulate pyyaml requests", file=sys.stderr)
-        sys.exit(1)
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+    return 0
+}
 
-if __name__ == '__main__':
-    main()
+# Main execution
+main() {
+    # Check virtualenv
+    if ! check_virtualenv; then
+        exit 1
+    fi
+    
+    # Find project directory
+    local project_dir
+    if ! project_dir=$(find_project_dir "$0"); then
+        echo "Error: Could not locate the eks-nvidia-tools project directory." >&2
+        echo "Please ensure this script is installed properly or run from the project directory." >&2
+        exit 1
+    fi
+    
+    # Check dependencies
+    if ! check_dependencies "$project_dir"; then
+        exit 1
+    fi
+    
+    # Execute the CLI with the virtualenv Python and proper project path
+    cd "$project_dir" || exit 1
+    exec "$PYTHON_EXECUTABLE" -m eks_nvidia_tools.cli.main "$@"
+}
+
+# Run main function with all arguments
+main "$@"

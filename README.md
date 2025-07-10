@@ -105,7 +105,30 @@ sudo ./install.sh --global
 python -m eks_nvidia_tools.cli.main <command> [options]
 ```
 
-**Note**: The installation has been simplified to use a single `install.sh` script. The wrapper automatically handles path resolution and creates the necessary project folders (`templates/`, `outputs/`, `logs/`, `cache/`) as needed.
+**Note**: The installation has been enhanced with comprehensive update handling:
+
+- **Smart version detection**: Automatically detects existing local and global installations
+- **Update management**: Shows upgrade/downgrade status with version comparison  
+- **Conflict resolution**: Warns about PATH conflicts between multiple installations
+- **Automatic backups**: Creates timestamped backups before overwriting existing versions
+- **Virtualenv integration**: Uses `/home/user/venv` Python environment automatically
+- **Project auto-discovery**: Finds project directory regardless of installation location
+
+#### Enhanced Installation Options
+
+```bash
+# Install with confirmation prompt (shows version comparison)
+./install.sh --local
+
+# Force install without prompts (useful for CI/CD)
+./install.sh --force --local
+
+# Install globally (requires sudo)
+sudo ./install.sh --global
+
+# Get help with all options
+./install.sh --help
+```
 
 ### AWS Permissions
 
