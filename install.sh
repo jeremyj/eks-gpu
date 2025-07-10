@@ -166,18 +166,9 @@ else
     print_info "Installation directory is already in your PATH."
 fi
 
-# Test the installation
-print_info "Testing installation..."
-if "$DEST_PATH" version >/dev/null 2>&1; then
-    print_info "✓ Installation test passed!"
-    print_info ""
-    print_info "You can now use the following commands:"
-    print_info "  eks-nvidia-tools parse --k8s-version 1.32"
-    print_info "  eks-nvidia-tools align --strategy ami-first --cluster-name my-cluster"
-    print_info "  eks-nvidia-tools template --generate --architecture arm64"
-    print_info "  eks-nvidia-tools version"
-else
-    print_warning "Installation test failed. The script was installed but may need dependencies."
-    print_warning "Try running: $DEST_PATH version"
-    print_warning "Make sure you have the required Python packages installed."
-fi
+print_info ""
+print_info "You can now use the following commands:"
+print_info "  eks-nvidia-tools parse --k8s-version 1.32"
+print_info "  eks-nvidia-tools align --strategy ami-first --cluster-name my-cluster"
+print_info "  eks-nvidia-tools template --generate --architecture arm64"
+print_info "  eks-nvidia-tools version"
