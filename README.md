@@ -105,22 +105,15 @@ sudo ./install.sh --global
 python -m eks_nvidia_tools.cli.main <command> [options]
 ```
 
-**Note**: The installation has been enhanced with comprehensive update handling:
+**Note**: The installation script provides a simple wrapper installation with Python environment integration and project auto-discovery.
 
-- **Smart version detection**: Automatically detects existing local and global installations
-- **Update management**: Shows upgrade/downgrade status with version comparison  
-- **Conflict resolution**: Warns about PATH conflicts between multiple installations
-- **Automatic backups**: Creates timestamped backups before overwriting existing versions
-- **Python environment integration**: Configurable to use specific Python environments
-- **Project auto-discovery**: Finds project directory regardless of installation location
-
-#### Enhanced Installation Options
+#### Installation Options
 
 ```bash
-# Install with confirmation prompt (shows version comparison)
+# Install to ~/.local/bin (default)
 ./install.sh --local
 
-# Force install without prompts (useful for CI/CD)
+# Force install without prompts
 ./install.sh --force --local
 
 # Install globally (requires sudo)

@@ -1,9 +1,8 @@
 #!/bin/bash
 #
-# EKS NVIDIA Tools - Enhanced Installation Script
+# EKS NVIDIA Tools - Simple Installation Script
 #
-# This script installs the eks-nvidia-tools wrapper with proper version detection,
-# update handling, and conflict resolution.
+# This script installs the eks-nvidia-tools wrapper script.
 #
 # Usage:
 #     ./install.sh [options]
@@ -11,14 +10,14 @@
 # Options:
 #     --local     Install to ~/.local/bin (default)
 #     --global    Install to /usr/local/bin (requires sudo)
-#     --force     Force reinstall without prompts
+#     --force     Force install without prompts
 #     --help      Show this help message
 #
 # Examples:
 #     ./install.sh                    # Install to ~/.local/bin
 #     ./install.sh --local            # Install to ~/.local/bin  
 #     sudo ./install.sh --global      # Install to /usr/local/bin
-#     ./install.sh --force            # Force reinstall
+#     ./install.sh --force            # Force install
 #
 
 set -e
@@ -33,7 +32,6 @@ FORCE_INSTALL=false
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Function to print colored output
@@ -49,222 +47,23 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-print_notice() {
-    echo -e "${BLUE}[NOTICE]${NC} $1"
-}
-
 # Function to show help
 show_help() {
-    echo "EKS NVIDIA Tools - Enhanced Installation Script"
+    echo "EKS NVIDIA Tools - Simple Installation Script"
     echo ""
     echo "Usage: $0 [options]"
     echo ""
     echo "Options:"
     echo "  --local     Install to ~/.local/bin (default)"
     echo "  --global    Install to /usr/local/bin (requires sudo)"
-    echo "  --force     Force reinstall without prompts"
+    echo "  --force     Force install without prompts"
     echo "  --help      Show this help message"
     echo ""
     echo "Examples:"
     echo "  $0                    # Install to ~/.local/bin"
     echo "  $0 --local           # Install to ~/.local/bin"
     echo "  sudo $0 --global     # Install to /usr/local/bin"
-    echo "  $0 --force           # Force reinstall"
-}
-
-# Function to extract version from Python __init__.py file
-extract_version_from_source() {
-    local base_path="$1"
-    local init_file="$base_path/eks_nvidia_tools/__init__.py"
-    
-    if [[ -f "$init_file" ]]; then
-        # Extract version from __version__ = "x.y.z" line
-        local version
-        version=$(grep -E '^__version__[[:space:]]*=[[:space:]]*["\x27]' "$init_file" | sed -E 's/^__version__[[:space:]]*=[[:space:]]*["\x27]([^"\x27]+)["\x27].*/\1/')
-        if [[ -n "$version" ]]; then
-            echo "v$version"
-            return 0
-        fi
-    fi
-    
-    echo "unknown"
-    return 1
-}
-
-# Function to get version from a script (with fallback to source parsing)
-get_version() {
-    local script_path="$1"
-    
-    # First try to extract from source code (works without dependencies)
-    local script_dir="$(dirname "$script_path")"
-    local version
-    version=$(extract_version_from_source "$script_dir")
-    if [[ "$version" != "unknown" ]]; then
-        echo "$version"
-        return 0
-    fi
-    
-    # Fallback: try to execute script if it exists and is executable
-    if [[ -x "$script_path" ]]; then
-        local version_output
-        version_output=$("$script_path" version 2>/dev/null | head -1 | grep -o "v[0-9.]*" 2>/dev/null || echo "unknown")
-        echo "$version_output"
-    else
-        echo "not_found"
-    fi
-}
-
-# Function to get current source version (with source code parsing)
-get_source_version() {
-    # Try to extract from source code first (doesn't require execution)
-    local version
-    version=$(extract_version_from_source ".")
-    if [[ "$version" != "unknown" ]]; then
-        echo "$version"
-        return 0
-    fi
-    
-    # Fallback: try to execute script if available
-    if [[ -x "$SOURCE_SCRIPT" ]]; then
-        local version_output
-        version_output=$("$SOURCE_SCRIPT" version 2>/dev/null | head -1 | grep -o "v[0-9.]*" 2>/dev/null || echo "unknown")
-        echo "$version_output"
-    else
-        echo "unknown"
-    fi
-}
-
-# Function to check for existing installations
-check_existing_installations() {
-    local local_path="$HOME/.local/bin/$SCRIPT_NAME"
-    local global_path="/usr/local/bin/$SCRIPT_NAME"
-    
-    print_info "Checking for existing installations..."
-    
-    # Check local installation
-    if [[ -f "$local_path" ]]; then
-        local local_version
-        local_version=$(get_version "$local_path")
-        print_notice "Found local installation: $local_path ($local_version)"
-        EXISTING_LOCAL="$local_path"
-        EXISTING_LOCAL_VERSION="$local_version"
-    fi
-    
-    # Check global installation
-    if [[ -f "$global_path" ]]; then
-        local global_version
-        global_version=$(get_version "$global_path")
-        print_notice "Found global installation: $global_path ($global_version)"
-        EXISTING_GLOBAL="$global_path"
-        EXISTING_GLOBAL_VERSION="$global_version"
-    fi
-    
-    # Check which one is active in PATH
-    local active_path
-    active_path=$(which "$SCRIPT_NAME" 2>/dev/null || echo "")
-    if [[ -n "$active_path" ]]; then
-        local active_version
-        active_version=$(get_version "$active_path")
-        print_notice "Currently active: $active_path ($active_version)"
-        ACTIVE_INSTALLATION="$active_path"
-        ACTIVE_VERSION="$active_version"
-    fi
-}
-
-# Function to compare versions (basic semantic version comparison)
-version_compare() {
-    local v1="$1"
-    local v2="$2"
-    
-    # Remove 'v' prefix if present
-    v1=${v1#v}
-    v2=${v2#v}
-    
-    # Handle unknown versions
-    if [[ "$v1" == "unknown" || "$v2" == "unknown" ]]; then
-        echo "unknown"
-        return
-    fi
-    
-    # Simple version comparison
-    if [[ "$v1" == "$v2" ]]; then
-        echo "equal"
-    else
-        # Use sort -V for version sorting
-        local newer
-        newer=$(printf "%s\n%s" "$v1" "$v2" | sort -V | tail -1)
-        if [[ "$newer" == "$v1" ]]; then
-            echo "newer"
-        else
-            echo "older"
-        fi
-    fi
-}
-
-# Function to handle installation confirmation
-confirm_installation() {
-    local dest_path="$1"
-    local source_version="$2"
-    
-    print_info ""
-    print_info "Installation Summary:"
-    print_info "  Source version: $source_version"
-    print_info "  Destination: $dest_path"
-    
-    if [[ -n "$EXISTING_LOCAL" ]]; then
-        print_info "  Existing local: $EXISTING_LOCAL ($EXISTING_LOCAL_VERSION)"
-    fi
-    
-    if [[ -n "$EXISTING_GLOBAL" ]]; then
-        print_info "  Existing global: $EXISTING_GLOBAL ($EXISTING_GLOBAL_VERSION)"
-    fi
-    
-    if [[ -n "$ACTIVE_INSTALLATION" ]]; then
-        print_info "  Currently active: $ACTIVE_INSTALLATION ($ACTIVE_VERSION)"
-    fi
-    
-    # Check if we're overwriting an existing installation
-    if [[ -f "$dest_path" ]]; then
-        local existing_version
-        existing_version=$(get_version "$dest_path")
-        local comparison
-        comparison=$(version_compare "$source_version" "$existing_version")
-        
-        case "$comparison" in
-            "equal")
-                print_warning "Same version ($source_version) is already installed at $dest_path"
-                ;;
-            "newer")
-                print_info "Upgrading from $existing_version to $source_version"
-                ;;
-            "older")
-                print_warning "Downgrading from $existing_version to $source_version"
-                ;;
-            *)
-                print_warning "Replacing $existing_version with $source_version (unable to compare)"
-                ;;
-        esac
-    else
-        print_info "Installing new version $source_version"
-    fi
-    
-    # Check for potential conflicts
-    if [[ "$dest_path" != "$ACTIVE_INSTALLATION" && -n "$ACTIVE_INSTALLATION" ]]; then
-        print_warning "This will install to $dest_path, but $ACTIVE_INSTALLATION is currently active in PATH"
-        print_warning "The active version may not change unless PATH order is modified"
-    fi
-    
-    print_info ""
-    
-    # Ask for confirmation unless force flag is set
-    if [[ "$FORCE_INSTALL" != "true" ]]; then
-        read -p "Do you want to continue? [y/N] " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            print_info "Installation cancelled by user"
-            exit 0
-        fi
-    fi
+    echo "  $0 --force           # Force install"
 }
 
 # Parse command line arguments
@@ -307,12 +106,6 @@ if [[ ! -x "$SOURCE_SCRIPT" ]]; then
     chmod +x "$SOURCE_SCRIPT"
 fi
 
-# Get source version
-SOURCE_VERSION=$(get_source_version)
-
-# Check for existing installations
-check_existing_installations
-
 # Create installation directory if it doesn't exist
 if [[ ! -d "$INSTALL_DIR" ]]; then
     print_info "Creating installation directory: $INSTALL_DIR"
@@ -333,14 +126,15 @@ fi
 # Destination path
 DEST_PATH="$INSTALL_DIR/$SCRIPT_NAME"
 
-# Handle installation confirmation
-confirm_installation "$DEST_PATH" "$SOURCE_VERSION"
-
-# Create backup if file exists
-if [[ -f "$DEST_PATH" ]]; then
-    backup_path="${DEST_PATH}.backup.$(date +%Y%m%d_%H%M%S)"
-    print_info "Creating backup: $backup_path"
-    cp "$DEST_PATH" "$backup_path"
+# Check if file already exists and ask for confirmation unless force flag is set
+if [[ -f "$DEST_PATH" && "$FORCE_INSTALL" != "true" ]]; then
+    print_warning "File already exists: $DEST_PATH"
+    read -p "Do you want to overwrite it? [y/N] " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        print_info "Installation cancelled by user"
+        exit 0
+    fi
 fi
 
 # Install the script
@@ -376,26 +170,6 @@ fi
 print_info "Testing installation..."
 if "$DEST_PATH" version >/dev/null 2>&1; then
     print_info "✓ Installation test passed!"
-    
-    # Show final status
-    print_info ""
-    print_info "Installation Summary:"
-    final_version=$(get_version "$DEST_PATH")
-    print_info "  Installed version: $final_version"
-    print_info "  Location: $DEST_PATH"
-    
-    # Check what's now active
-    new_active=$(which "$SCRIPT_NAME" 2>/dev/null || echo "")
-    if [[ -n "$new_active" ]]; then
-        new_active_version=$(get_version "$new_active")
-        if [[ "$new_active" == "$DEST_PATH" ]]; then
-            print_info "  Status: ✓ Active in PATH"
-        else
-            print_warning "  Status: Installed but not active (PATH priority issue)"
-            print_warning "  Active version: $new_active ($new_active_version)"
-        fi
-    fi
-    
     print_info ""
     print_info "You can now use the following commands:"
     print_info "  eks-nvidia-tools parse --k8s-version 1.32"
