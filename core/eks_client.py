@@ -422,7 +422,7 @@ class EKSClient:
             self.log(f"AMI description: {description}")
             
             # Extract K8s version and release date from description
-            # Example: "EKS Kubernetes Worker AMI for Machine Learning Accelerated Workloads on AmazonLinux2 image, (k8s: 1.31.2, containerd: 1.7.*)"
+            # Example: "EKS Kubernetes Worker AMI for GPU Accelerated Computing on AmazonLinux2 image, (k8s: 1.31.2, containerd: 1.7.*)"
             k8s_match = re.search(r'k8s:\s*([0-9]+\.[0-9]+\.[0-9]+)', description)
             if not k8s_match:
                 raise EKSClientError(f"Could not extract K8s version from AMI description: {description}")

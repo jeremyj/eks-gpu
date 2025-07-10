@@ -23,7 +23,7 @@ class AMIType(Enum):
     
     @property
     def is_gpu_enabled(self) -> bool:
-        """Check if this AMI type supports GPU workloads."""
+        """Check if this AMI type supports GPU instances."""
         return "NVIDIA" in self.value or "GPU" in self.value
     
     @property

@@ -311,7 +311,7 @@ class TemplateLoader:
             "taints": [],
             "tags": {
                 "Environment": "production",
-                "Project": "ml-workloads",
+                "Project": "gpu-cluster",
                 "Architecture": architecture.value,
                 "ManagedBy": "eks-nvidia-alignment-tool"
             }
@@ -387,79 +387,6 @@ class TemplateLoader:
 class TemplateGenerator:
     """Generator for creating templates based on requirements."""
     
-    @staticmethod
-    def generate_for_workload(workload_type: str, architecture: Architecture = Architecture.X86_64,
-                            performance_tier: str = "standard") -> Dict[str, Any]:
-        """
-        Generate a template optimized for specific workload types.
-        
-        Args:
-            workload_type: "ml-training", "ml-inference", "gaming", "rendering", "general-gpu"
-            architecture: Target architecture
-            performance_tier: "basic", "standard", "high", "extreme"
-            
-        Returns:
-            Generated template dictionary
-        """
-        from utils.architecture_utils import ArchitectureManager
-        
-        arch_manager = ArchitectureManager()
-        
-        # Base template
-        base_template = {
-            "clusterName": "",
-            "nodegroupName": f"{workload_type}-{architecture.value}",
-            "nodeRole": "",
-            "subnets": [],
-            "capacityType": "ON_DEMAND",
-            "scalingConfig": {"minSize": 0, "maxSize": 10, "desiredSize": 1},
-            "updateConfig": {"maxUnavailable": 1},
-            "remoteAccess": {},
-            "labels": arch_manager.get_architecture_labels(architecture),
-            "taints": [],
-            "tags": {"WorkloadType": workload_type, "Architecture": architecture.value}
-        }
-        
-        # Workload-specific configurations
-        workload_configs = {
-            "ml-training": {
-                "instanceTypes": arch_manager.get_recommended_gpu_instances(architecture, performance_tier),
-                "diskSize": 100,
-                "labels": {"workload": "ml-training", "spot-ok": "true"},
-                "capacityType": "SPOT" if performance_tier in ["basic", "standard"] else "ON_DEMAND"
-            },
-            "ml-inference": {
-                "instanceTypes": arch_manager.get_recommended_gpu_instances(architecture, "standard"),
-                "diskSize": 50,
-                "labels": {"workload": "ml-inference"},
-                "scalingConfig": {"minSize": 1, "maxSize": 20, "desiredSize": 2}
-            },
-            "gaming": {
-                "instanceTypes": arch_manager.get_recommended_gpu_instances(architecture, "high"),
-                "diskSize": 200,
-                "labels": {"workload": "gaming"},
-                "capacityType": "ON_DEMAND"
-            },
-            "rendering": {
-                "instanceTypes": arch_manager.get_recommended_gpu_instances(architecture, "extreme"),
-                "diskSize": 500,
-                "labels": {"workload": "rendering"},
-                "capacityType": "ON_DEMAND"
-            },
-            "general-gpu": {
-                "instanceTypes": arch_manager.get_recommended_gpu_instances(architecture, performance_tier),
-                "diskSize": 50,
-                "labels": {"workload": "general-gpu"}
-            }
-        }
-        
-        # Apply workload-specific configuration
-        if workload_type in workload_configs:
-            config = workload_configs[workload_type]
-            merger = TemplateMerger()
-            base_template = merger.merge_configs(base_template, config)
-        
-        return base_template
     
     @staticmethod
     def generate_multi_architecture_templates(cluster_name: str, 

@@ -28,7 +28,7 @@ eks-nvidia-tools align \
     --profile production \
     --region us-west-2
 
-# Generate nodegroup templates (simplified - no workload types)
+# Generate basic nodegroup templates
 eks-nvidia-tools template --generate --architecture arm64
 ```
 
@@ -808,7 +808,6 @@ python -m eks_nvidia_tools.cli.main parse \
 # YAML output for configuration management
 python -m eks_nvidia_tools.cli.main template \
     --generate \
-    --workload ml-training \
     --output yaml > training-config.yaml
 ```
 
@@ -856,22 +855,19 @@ Generating nodegroup configuration... ✓ Done (0.2s)
 ### Template Command Output
 
 ```bash
-$ python -m eks_nvidia_tools.cli.main template --generate --workload ml-training --architecture arm64
+$ python -m eks_nvidia_tools.cli.main template --generate --architecture arm64
 
 Building nodegroup configuration... ✓ Done (0.1s)
-Generating ml-training template... ✓ Done (0.3s)
-Writing template to nodegroup-ml-training-arm64.json... ✓ Done (0.0s)
+Generating template... ✓ Done (0.3s)
+Writing template to nodegroup-arm64.json... ✓ Done (0.0s)
 
 Template Configuration:
   Name: gpu-workers-arm64
-  Type: ml-training
   Architecture: arm64
-  Instance Type: N/A
   AMI Type: AL2023_ARM_64_NVIDIA
 
-✓ Template generated: nodegroup-ml-training-arm64.json
+✓ Template generated: nodegroup-arm64.json
 ℹ Configuration for ARM64:
-ℹ   • Workload: ml-training
 ℹ   • Instance types: ['g5g.xlarge']
 ℹ   • Capacity type: ON_DEMAND
 ℹ   • Scaling: 0-10 nodes

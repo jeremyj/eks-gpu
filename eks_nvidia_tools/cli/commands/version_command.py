@@ -150,8 +150,8 @@ class VersionCommand:
             print("  ✓ ami-first: Use latest AMI, update containers")
             print("  ✓ container-first: Find compatible AMI for existing drivers")
             
-            print("\nTemplate Workloads:")
-            print("  ✓ ml-training: Machine learning training workloads")
-            print("  ✓ ml-inference: Machine learning inference workloads")
-            print("  ✓ general-gpu: General purpose GPU workloads")
+            print("\nTemplate Features:")
+            print("  ✓ Basic GPU nodegroup templates")
+            print("  ✓ Multi-architecture support (x86_64, ARM64)")
+            print("  ✓ Configurable instance types and scaling")
             print("  ✓ custom: Custom configurations")

@@ -300,7 +300,7 @@ class ArchitectureManager:
             recommendations.append("Multi-architecture deployment detected")
             recommendations.append("Ensure container images support all target architectures")
             recommendations.append("Use multi-arch container registries")
-            recommendations.append("Test workload scheduling across architectures")
+            recommendations.append("Test application scheduling across architectures")
         
         if Architecture.ARM64 in architectures_used:
             recommendations.append("ARM64 instances detected - verify NVIDIA driver compatibility")

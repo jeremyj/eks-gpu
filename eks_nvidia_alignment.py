@@ -815,7 +815,7 @@ def main():
             # Resource tags
             "tags": {
                 "Environment": "production",
-                "Project": "ml-workloads",
+                "Project": "gpu-cluster",
                 "Architecture": args.architecture,
                 "ManagedBy": "eks-nvidia-alignment-tool"
             }

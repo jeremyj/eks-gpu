@@ -186,7 +186,7 @@ class NodeGroupConfig:
             "ManagedBy": "eks-nvidia-alignment-tool"
         })
         
-        # Increase disk size for GPU workloads
+        # Increase disk size for GPU instances
         if self.disk_size == 20:  # Only if still default
             self.disk_size = 50
     
@@ -457,7 +457,7 @@ class NodeGroupConfigBuilder:
         return self
     
     def gpu_config(self, architecture: Architecture) -> 'NodeGroupConfigBuilder':
-        """Configure for GPU workloads."""
+        """Configure for GPU instances."""
         self.config.set_gpu_defaults(architecture)
         return self
     

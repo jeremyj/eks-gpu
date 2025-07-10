@@ -414,7 +414,7 @@ class AlignCommand:
             # Resource tags
             "tags": {
                 "Environment": "production",
-                "Project": "ml-workloads",
+                "Project": "gpu-cluster",
                 "Architecture": architecture,
                 "ManagedBy": "eks-nvidia-tools"
             }
