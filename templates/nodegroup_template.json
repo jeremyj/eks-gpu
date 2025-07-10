@@ -1,0 +1,41 @@
+{
+    "clusterName": "dev",
+    "nodegroupName": "GPU-AL2023",
+    "scalingConfig": {
+        "minSize": 0,
+        "maxSize": 2,
+        "desiredSize": 0
+    },
+    "diskSize": 20,
+    "subnets": [
+        "${SUBNET_ID_1}",
+        "${SUBNET_ID_2}"
+    ],
+    "instanceTypes": [
+        "g4dn.xlarge"
+    ],
+    "amiType": "AL2023_x86_64_NVIDIA",
+    "remoteAccess": {
+        "ec2SshKey": "${EC2_KEY_PAIR}",
+        "sourceSecurityGroups": [
+            "${SECURITY_GROUP_ID}" 
+        ]
+    },
+    "nodeRole": "arn:aws:iam::ACCOUNT_ID:role/AmazonEKSNodeRole",
+    "labels": {
+        "capability": "gpu",
+        "k8s.amazonaws.com/accelerator": "nvidia-tesla-t4"
+    },
+    "taints": [
+        {
+            "key": "nvidia.com/gpu",
+            "effect": "NO_SCHEDULE"
+        }
+    ],
+    "updateConfig": {
+        "maxUnavailable": 1
+    },
+    "capacityType": "ON_DEMAND",
+    "version": "1.31",
+    "releaseVersion": "1.31.0-20240928"
+}

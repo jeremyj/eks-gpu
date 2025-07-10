@@ -193,4 +193,11 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Project-specific folders
+outputs/
+logs/
+cache/
+
+# Allow templates folder JSON files
 *.json
+!templates/*.json
