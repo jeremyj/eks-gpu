@@ -9,7 +9,7 @@ A comprehensive toolkit for managing NVIDIA drivers between Amazon EKS nodegroup
 pip install beautifulsoup4 tabulate pyyaml requests
 
 # Install the wrapper for easy usage (recommended)
-./install-wrapper.sh --local
+./install.sh --local
 export PATH="$PATH:$HOME/.local/bin"
 
 # Check version and capabilities
@@ -85,7 +85,7 @@ For the easiest experience, install the wrapper script that allows you to use `e
 cd eks-gpu
 
 # Install wrapper to ~/.local/bin (recommended)
-./install-wrapper.sh --local
+./install.sh --local
 
 # Add ~/.local/bin to your PATH if it's not already there
 echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
@@ -99,14 +99,13 @@ eks-nvidia-tools version
 
 ```bash
 # Install globally (requires sudo)
-sudo ./install-wrapper.sh --global
+sudo ./install.sh --global
 
-# Use local wrapper without installation
-./eks-nvidia-tools-local <command> [options]
-
-# Use direct Python module execution
+# Use direct Python module execution (no installation needed)
 python -m eks_nvidia_tools.cli.main <command> [options]
 ```
+
+**Note**: The installation has been simplified to use a single `install.sh` script. The wrapper automatically handles path resolution and creates the necessary project folders (`templates/`, `outputs/`, `logs/`, `cache/`) as needed.
 
 ### AWS Permissions
 
@@ -192,12 +191,11 @@ The unified CLI provides four main commands:
 # Method 1: Direct Python module execution
 python -m eks_nvidia_tools.cli.main <command> [options]
 
-# Method 2: Using the wrapper script (recommended)
-./eks-nvidia-tools-local <command> [options]
-
-# Method 3: Install wrapper globally (easiest for regular use)
-./install-wrapper.sh --local  # Installs to ~/.local/bin
+# Method 2: Install wrapper globally (easiest for regular use)
+./install.sh --local  # Installs to ~/.local/bin
 eks-nvidia-tools <command> [options]  # Use from anywhere
+
+**Note**: Templates are now stored in `templates/` folder, and outputs are automatically saved to `outputs/` folder.
 
 # Global AWS options (can be used with any command):
 eks-nvidia-tools --aws-profile production --aws-region us-west-2 <command> [options]
@@ -884,15 +882,22 @@ Template Configuration:
 Contributions are welcome! This project follows a modular architecture with clear separation of concerns:
 
 ```
-eks_nvidia_tools/
-├── cli/                    # Unified CLI interface and commands
-│   ├── commands/           # Individual command implementations
-│   ├── shared/             # Shared utilities (arguments, output, validation)
-│   └── legacy/             # Backward compatibility wrappers
-├── core/                   # Core AMI parsing and GitHub integration
-├── models/                 # Data models and types (AMI, NodeGroup, etc.)
-├── utils/                  # Utility functions (templates, architecture)
-└── tests/                  # Comprehensive test suites
+eks-gpu/
+├── eks_nvidia_tools/       # Main Python package
+│   ├── cli/               # Unified CLI interface and commands
+│   │   ├── commands/      # Individual command implementations
+│   │   ├── shared/        # Shared utilities (arguments, output, validation)
+│   │   └── legacy/        # Backward compatibility wrappers
+│   └── ...
+├── core/                  # Core AMI parsing and GitHub integration
+├── models/                # Data models and types (AMI, NodeGroup, etc.)
+├── utils/                 # Utility functions (templates, architecture, paths)
+├── templates/             # Input templates (nodegroup_template.json)
+├── outputs/               # Generated configurations and artifacts
+├── logs/                  # Application logs and debug info
+├── cache/                 # Temporary files and caches
+├── eks-nvidia-tools       # Main wrapper script
+└── install.sh            # Installation script
 ```
 
 ### Development Setup
@@ -902,9 +907,23 @@ git clone <repository-url>
 cd eks-gpu
 pip install beautifulsoup4 tabulate pyyaml requests
 
+# Install the wrapper (optional)
+./install.sh --local
+
 # Run tests
 python test_cli_comprehensive.py
 ```
+
+### Project Structure
+
+The project now uses an organized folder structure:
+
+- **templates/**: Input templates (your `nodegroup_template.json` files)
+- **outputs/**: Generated configurations and artifacts (automatically created)
+- **logs/**: Application logs and debug information (automatically created)
+- **cache/**: Temporary files and caches (automatically created)
+
+All folders are created automatically when needed. The `outputs/`, `logs/`, and `cache/` folders are excluded from version control.
 
 ### Testing Different Scenarios
 
