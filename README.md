@@ -883,7 +883,7 @@ eks-gpu/
 │   ├── cli/               # Unified CLI interface and commands
 │   │   ├── commands/      # Individual command implementations
 │   │   ├── shared/        # Shared utilities (arguments, output, validation)
-│   │   └── legacy/        # Backward compatibility wrappers
+│   │   └── main.py        # CLI entry point
 │   └── ...
 ├── core/                  # Core AMI parsing and GitHub integration
 ├── models/                # Data models and types (AMI, NodeGroup, etc.)
