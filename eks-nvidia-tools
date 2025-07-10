@@ -37,9 +37,11 @@ def main():
         sys.exit(cli_main())
     except ImportError as e:
         print(f"Error: Could not import eks_nvidia_tools module: {e}", file=sys.stderr)
-        print(f"Make sure you're running this script from the correct directory.", file=sys.stderr)
-        print(f"Current directory: {os.getcwd()}", file=sys.stderr)
-        print(f"Script directory: {script_dir}", file=sys.stderr)
+        print(f"Project directory: {script_dir}", file=sys.stderr)
+        print(f"Python path: {sys.path[:3]}...", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("Make sure you have the required dependencies installed:", file=sys.stderr)
+        print("  pip install beautifulsoup4 tabulate pyyaml requests", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
