@@ -4,6 +4,7 @@ Template loading, merging, and validation utilities - FIXED VERSION
 
 import json
 import os
+import re
 from typing import Dict, Any, List, Optional, Tuple, Union
 from pathlib import Path
 from models.nodegroup_config import NodeGroupConfig
@@ -220,13 +221,13 @@ class TemplateLoader:
     @classmethod
     def load_template(cls, template_path: Optional[str] = None) -> Dict[str, Any]:
         """
-        Load a nodegroup template from file.
+        Load a nodegroup template from file and substitute environment variables.
         
         Args:
             template_path: Path to template file (optional, will search defaults)
             
         Returns:
-            Template dictionary
+            Template dictionary with environment variables substituted
             
         Raises:
             TemplateError: If template cannot be loaded or is invalid
@@ -240,7 +241,13 @@ class TemplateLoader:
             if os.path.exists(path):
                 try:
                     with open(path, 'r') as f:
-                        template = json.load(f)
+                        template_content = f.read()
+                    
+                    # Substitute environment variables
+                    template_content = cls._substitute_env_vars(template_content)
+                    
+                    # Parse JSON
+                    template = json.loads(template_content)
                     
                     # Validate template
                     is_valid, issues = TemplateValidator.validate_template(template)
@@ -259,6 +266,23 @@ class TemplateLoader:
             raise TemplateError(f"Template file not found: {template_path}")
         else:
             raise TemplateError(f"No template file found. Searched: {', '.join(cls.DEFAULT_TEMPLATE_PATHS)}")
+    
+    @classmethod
+    def _substitute_env_vars(cls, content: str) -> str:
+        """
+        Substitute environment variables in template content.
+        
+        Args:
+            content: Template content with ${VAR_NAME} placeholders
+            
+        Returns:
+            Content with environment variables substituted
+        """
+        def replace_var(match):
+            var_name = match.group(1)
+            return os.getenv(var_name, match.group(0))  # Return original if env var not found
+        
+        return re.sub(r'\$\{([^}]+)\}', replace_var, content)
     
     @classmethod
     def create_default_template(cls, cluster_name: str = "", architecture: Architecture = Architecture.X86_64,
