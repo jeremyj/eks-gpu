@@ -37,7 +37,40 @@ class AlignCommand:
         parser = subparsers.add_parser(
             'align',
             help='Align NVIDIA drivers between EKS AMIs and container images',
-            description='Align NVIDIA drivers between EKS nodegroup AMIs and container images using ami-first or container-first strategies. Use --extract-from-cluster to apply strategies to existing nodegroups.'
+            description='Align NVIDIA drivers between EKS nodegroup AMIs and container images using ami-first or container-first strategies. Use --extract-from-cluster to apply strategies to existing nodegroups.',
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            epilog="""
+Examples:
+  # AMI-first strategy: use latest AMI, update container drivers
+  eks-nvidia-tools align --strategy ami-first --cluster-name my-cluster
+
+  # AMI-first with explicit K8s version
+  eks-nvidia-tools align --strategy ami-first --k8s-version 1.32
+
+  # Container-first strategy: find AMI matching current container driver
+  eks-nvidia-tools align --strategy container-first \\
+    --current-driver-version 570.124.06 --k8s-version 1.32
+
+  # Plan-only mode: show what would be done without executing
+  eks-nvidia-tools align --strategy ami-first --cluster-name my-cluster --plan-only
+
+  # Extraction mode: extract and align existing GPU nodegroups
+  eks-nvidia-tools align --strategy ami-first --extract-from-cluster my-cluster
+
+  # Extraction with specific nodegroups
+  eks-nvidia-tools align --strategy ami-first --extract-from-cluster my-cluster \\
+    --extract-nodegroups gpu-workers-1 gpu-workers-2
+
+  # Extraction to different target cluster
+  eks-nvidia-tools align --strategy ami-first --extract-from-cluster source-cluster \\
+    --target-cluster target-cluster
+
+  # Generate nodegroup template
+  eks-nvidia-tools align --strategy ami-first --generate-template
+
+  # ARM64 architecture
+  eks-nvidia-tools align --strategy ami-first --k8s-version 1.32 --architecture arm64
+"""
         )
         
         # Strategy selection

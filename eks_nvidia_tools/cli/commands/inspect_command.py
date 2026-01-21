@@ -29,7 +29,29 @@ class InspectCommand:
         parser = subparsers.add_parser(
             'inspect',
             help='Inspect EKS nodegroups and report NVIDIA driver versions',
-            description='Query EKS nodegroups and report their NVIDIA driver versions based on the AMI release version.'
+            description='Query EKS nodegroups and report their NVIDIA driver versions based on the AMI release version.',
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            epilog="""
+Examples:
+  # Inspect all GPU nodegroups in a cluster
+  eks-nvidia-tools inspect --cluster-name my-cluster
+
+  # Inspect a specific nodegroup
+  eks-nvidia-tools inspect --cluster-name my-cluster --nodegroup-name gpu-workers
+
+  # Include non-GPU nodegroups
+  eks-nvidia-tools inspect --cluster-name my-cluster --all-nodegroups
+
+  # JSON output for scripting
+  eks-nvidia-tools inspect --cluster-name my-cluster --output json
+
+  # YAML output
+  eks-nvidia-tools inspect --cluster-name my-cluster --output yaml
+
+  # Use specific AWS profile and region
+  eks-nvidia-tools inspect --cluster-name my-cluster \\
+    --profile production --region us-west-2
+"""
         )
 
         # Cluster options

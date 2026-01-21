@@ -31,7 +31,31 @@ class ParseCommand:
         parser = subparsers.add_parser(
             'parse',
             help='Parse EKS AMI releases and find NVIDIA driver versions',
-            description='Parse EKS AMI releases to find NVIDIA driver versions for specific Kubernetes versions and architectures.'
+            description='Parse EKS AMI releases to find NVIDIA driver versions for specific Kubernetes versions and architectures.',
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            epilog="""
+Examples:
+  # Find driver version for a Kubernetes version
+  eks-nvidia-tools parse --k8s-version 1.32
+
+  # Find latest release for a K8s version
+  eks-nvidia-tools parse --k8s-version 1.32 --latest
+
+  # Search for specific driver version
+  eks-nvidia-tools parse --driver-version 570.124.06
+
+  # Fuzzy search for driver versions
+  eks-nvidia-tools parse --driver-version 570 --fuzzy
+
+  # List available Kubernetes versions
+  eks-nvidia-tools parse --list-versions
+
+  # ARM64 architecture search
+  eks-nvidia-tools parse --k8s-version 1.32 --architecture arm64
+
+  # Include deprecated AL2 AMIs
+  eks-nvidia-tools parse --k8s-version 1.32 --show-deprecated
+"""
         )
         
         # Add argument groups

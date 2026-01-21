@@ -55,7 +55,30 @@ class SearchCommand:
         parser = subparsers.add_parser(
             'search',
             help='Search NVIDIA CUDA repository for driver packages',
-            description='Search the NVIDIA CUDA repository for driver packages (libnvidia-compute, libnvidia-encode, libnvidia-decode).'
+            description='Search the NVIDIA CUDA repository for driver packages (libnvidia-compute, libnvidia-encode, libnvidia-decode).',
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            epilog="""
+Examples:
+  # Search for all packages with driver major version
+  eks-nvidia-tools search --driver-version 570
+
+  # Search for specific driver version
+  eks-nvidia-tools search --driver-version 570.124.06
+
+  # Search specific package type
+  eks-nvidia-tools search --driver-version 570 --package-type compute
+  eks-nvidia-tools search --driver-version 570 --package-type encode
+
+  # ARM64 architecture
+  eks-nvidia-tools search --driver-version 570 --architecture arm64
+
+  # Different OS versions
+  eks-nvidia-tools search --driver-version 570 --os-version ubuntu2404
+  eks-nvidia-tools search --driver-version 570 --os-version debian12
+
+  # JSON output
+  eks-nvidia-tools search --driver-version 570 --output json
+"""
         )
 
         # Required arguments

@@ -31,7 +31,35 @@ class TemplateCommand:
         parser = subparsers.add_parser(
             'template',
             help='Generate and validate nodegroup templates',
-            description='Manage EKS nodegroup templates with generation and validation capabilities.'
+            description='Manage EKS nodegroup templates with generation and validation capabilities.',
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            epilog="""
+Examples:
+  # Generate a basic GPU nodegroup template
+  eks-nvidia-tools template --generate
+
+  # Generate with custom cluster and nodegroup names
+  eks-nvidia-tools template --generate --cluster-name my-cluster \\
+    --nodegroup-name gpu-workers
+
+  # Generate for ARM64 architecture
+  eks-nvidia-tools template --generate --architecture arm64
+
+  # Generate with custom scaling configuration
+  eks-nvidia-tools template --generate --min-size 1 --max-size 20 --desired-size 3
+
+  # Generate with custom instance types
+  eks-nvidia-tools template --generate --instance-types g5.xlarge g5.2xlarge
+
+  # Output to specific file
+  eks-nvidia-tools template --generate -o my-template.json
+
+  # Validate an existing template
+  eks-nvidia-tools template --validate nodegroup-template.json
+
+  # Validate with JSON output
+  eks-nvidia-tools template --validate nodegroup-template.json --output json
+"""
         )
         
         # Operation selection

@@ -233,11 +233,17 @@ python -m eks_nvidia_tools.cli.main <command> [options]
 ./install.sh --local  # Installs to ~/.local/bin
 eks-nvidia-tools <command> [options]  # Use from anywhere
 
-**Note**: Templates are now stored in `templates/` folder, and outputs are automatically saved to `outputs/` folder.
+# Show full help for ALL commands with examples
+eks-nvidia-tools -h
+
+# Show help for a specific command
+eks-nvidia-tools parse --help
 
 # Global AWS options (can be used with any command):
 eks-nvidia-tools --aws-profile production --aws-region us-west-2 <command> [options]
 ```
+
+**Note**: Templates are stored in `templates/` folder, outputs are saved to `outputs/` folder.
 
 ## Command Reference
 

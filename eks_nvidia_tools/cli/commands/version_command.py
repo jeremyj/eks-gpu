@@ -19,7 +19,19 @@ class VersionCommand:
         parser = subparsers.add_parser(
             'version',
             help='Show version information',
-            description='Display version information for EKS NVIDIA Tools and its components.'
+            description='Display version information for EKS NVIDIA Tools and its components.',
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            epilog="""
+Examples:
+  # Show basic version
+  eks-nvidia-tools version
+
+  # Show detailed version with dependencies
+  eks-nvidia-tools version --verbose
+
+  # JSON output
+  eks-nvidia-tools version --output json
+"""
         )
         
         parser.add_argument(
