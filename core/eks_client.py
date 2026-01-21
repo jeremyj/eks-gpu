@@ -366,14 +366,48 @@ class EKSClient:
         pattern = r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$'
         return bool(re.match(pattern, name))
     
+    def _validate_release_version_format(self, release_version: str) -> bool:
+        """Validate release version format X.Y.Z-YYYYMMDD."""
+        pattern = r'^\d+\.\d+\.\d+-\d{8}$'
+        return bool(re.match(pattern, release_version))
+
+    def _derive_release_version_from_ami(self, ami_id: str, k8s_version: str) -> str:
+        """
+        Fallback: derive release version from AMI description and creation date.
+
+        This is a fallback for edge cases where the release_version SSM parameter
+        is not available. Note: This may produce incorrect release dates since
+        AMI creation date != AWS EKS release date.
+        """
+        ami_response = self.ec2_client.describe_images(ImageIds=[ami_id])
+        if not ami_response['Images']:
+            raise EKSClientError(f"AMI {ami_id} not found")
+
+        description = ami_response['Images'][0]['Description']
+        self.log(f"AMI description: {description}")
+
+        # Extract K8s version from description
+        # Example: "EKS Kubernetes Worker AMI for GPU Accelerated Computing on AmazonLinux2 image, (k8s: 1.31.2, containerd: 1.7.*)"
+        k8s_match = re.search(r'k8s:\s*([0-9]+\.[0-9]+\.[0-9]+)', description)
+        if not k8s_match:
+            raise EKSClientError(f"Could not extract K8s version from AMI description: {description}")
+
+        full_k8s_version = k8s_match.group(1)
+
+        # Get creation date from AMI (fallback, may not match actual release date)
+        creation_date = ami_response['Images'][0]['CreationDate']
+        release_date = creation_date[:10].replace('-', '')
+
+        return f"{full_k8s_version}-{release_date}"
+
     def get_actual_ami_release_version(self, k8s_version: str, ami_type: str) -> Tuple[str, str]:
         """
         Get the actual AMI release version from AWS SSM parameters.
-        
+
         Args:
             k8s_version: Kubernetes version (e.g., "1.31")
             ami_type: AMI type (e.g., "AL2023_x86_64_NVIDIA")
-            
+
         Returns:
             Tuple of (full_release_version, ami_id)
             e.g., ("1.31.2-20250610", "ami-043fbfde365cd962d")
@@ -385,66 +419,124 @@ class EKSClient:
                 # AL2023 NVIDIA variants
                 'AL2023_x86_64_NVIDIA': 'amazon-linux-2023/x86_64/nvidia',
                 'AL2023_ARM_64_NVIDIA': 'amazon-linux-2023/arm64/nvidia',
-                
+
                 # AL2 GPU variant (legacy)
                 'AL2_x86_64_GPU': 'amazon-linux-2-gpu',
-                
+
                 # AL2023 standard variants (for completeness)
                 'AL2023_x86_64_STANDARD': 'amazon-linux-2023/x86_64/standard',
                 'AL2023_ARM_64_STANDARD': 'amazon-linux-2023/arm64/standard',
-                
+
                 # AL2 standard variants (for completeness)
                 'AL2_x86_64': 'amazon-linux-2',
                 'AL2_ARM_64': 'amazon-linux-2-arm64'
             }
-            
+
             ami_path = ami_type_mapping.get(ami_type)
             if not ami_path:
                 raise EKSClientError(f"Unknown AMI type: {ami_type}. Supported types: {list(ami_type_mapping.keys())}")
-            
-            # Construct SSM parameter name with correct format
-            parameter_name = f"/aws/service/eks/optimized-ami/{k8s_version}/{ami_path}/recommended/image_id"
-            
-            self.log(f"Getting AMI ID from SSM parameter: {parameter_name}")
-            
-            # Get AMI ID from SSM
-            response = self.ssm_client.get_parameter(Name=parameter_name)
-            ami_id = response['Parameter']['Value']
-            
+
+            # Construct SSM parameter names
+            release_version_param = f"/aws/service/eks/optimized-ami/{k8s_version}/{ami_path}/recommended/release_version"
+            image_id_param = f"/aws/service/eks/optimized-ami/{k8s_version}/{ami_path}/recommended/image_id"
+
+            self.log(f"Getting release version and AMI ID from SSM parameters")
+
+            # Fetch both parameters in one call
+            response = self.ssm_client.get_parameters(Names=[release_version_param, image_id_param])
+
+            # Build a map of parameter name -> value
+            params = {p['Name']: p['Value'] for p in response['Parameters']}
+
+            ami_id = params.get(image_id_param)
+            release_version = params.get(release_version_param)
+
+            if not ami_id:
+                raise EKSClientError(f"No AMI available for K8s {k8s_version} with AMI type {ami_type} in region {self.region}")
+
             self.log(f"Found AMI ID: {ami_id}")
-            
-            # Get AMI description
-            ami_response = self.ec2_client.describe_images(ImageIds=[ami_id])
-            if not ami_response['Images']:
-                raise EKSClientError(f"AMI {ami_id} not found")
-            
-            description = ami_response['Images'][0]['Description']
-            self.log(f"AMI description: {description}")
-            
-            # Extract K8s version and release date from description
-            # Example: "EKS Kubernetes Worker AMI for GPU Accelerated Computing on AmazonLinux2 image, (k8s: 1.31.2, containerd: 1.7.*)"
-            k8s_match = re.search(r'k8s:\s*([0-9]+\.[0-9]+\.[0-9]+)', description)
-            if not k8s_match:
-                raise EKSClientError(f"Could not extract K8s version from AMI description: {description}")
-            
-            full_k8s_version = k8s_match.group(1)
-            
-            # Get creation date from AMI
-            creation_date = ami_response['Images'][0]['CreationDate']
-            # Convert from ISO format to YYYYMMDD
-            release_date = creation_date[:10].replace('-', '')
-            
-            # Construct full release version
-            full_release_version = f"{full_k8s_version}-{release_date}"
-            
-            self.log(f"Extracted release version: {full_release_version}")
-            
-            return full_release_version, ami_id
-            
+
+            # Validate release_version if we got it
+            if release_version and self._validate_release_version_format(release_version):
+                self.log(f"Using SSM release version: {release_version}")
+                return release_version, ami_id
+
+            # Fallback: derive from AMI description (less reliable)
+            self.log("release_version SSM parameter not available, deriving from AMI description")
+            derived_version = self._derive_release_version_from_ami(ami_id, k8s_version)
+            self.log(f"Derived release version: {derived_version}")
+            return derived_version, ami_id
+
         except ClientError as e:
             if e.response['Error']['Code'] == 'ParameterNotFound':
                 raise EKSClientError(f"No AMI available for K8s {k8s_version} with AMI type {ami_type} in region {self.region}")
             raise EKSClientError(f"Failed to get AMI release version: {e}")
         except Exception as e:
             raise EKSClientError(f"Failed to get AMI release version: {e}")
-    
+
+    def get_release_version_for_date(self, k8s_version: str, ami_type: str, release_date: str) -> str:
+        """
+        Get the EKS release version for a specific release date.
+
+        Args:
+            k8s_version: Kubernetes version (e.g., "1.32")
+            ami_type: AMI type (e.g., "AL2023_x86_64_NVIDIA")
+            release_date: Release date in YYYYMMDD format (e.g., "20250519")
+
+        Returns:
+            Full release version (e.g., "1.32.7-20250519")
+        """
+        try:
+            # Build AMI name pattern based on AMI type
+            # EKS AMI names follow pattern: amazon-eks-node-{os}-{arch}-{type}-{k8s_version}-v{date}
+            ami_name_patterns = {
+                'AL2023_x86_64_NVIDIA': f"amazon-eks-node-al2023-x86_64-nvidia-{k8s_version}-v{release_date}",
+                'AL2023_ARM_64_NVIDIA': f"amazon-eks-node-al2023-arm64-nvidia-{k8s_version}-v{release_date}",
+                'AL2_x86_64_GPU': f"amazon-eks-gpu-node-{k8s_version}-v{release_date}",
+                'AL2023_x86_64_STANDARD': f"amazon-eks-node-al2023-x86_64-standard-{k8s_version}-v{release_date}",
+                'AL2023_ARM_64_STANDARD': f"amazon-eks-node-al2023-arm64-standard-{k8s_version}-v{release_date}",
+                'AL2_x86_64': f"amazon-eks-node-{k8s_version}-v{release_date}",
+                'AL2_ARM_64': f"amazon-eks-arm64-node-{k8s_version}-v{release_date}"
+            }
+
+            ami_name_pattern = ami_name_patterns.get(ami_type)
+            if not ami_name_pattern:
+                raise EKSClientError(f"Unknown AMI type: {ami_type}")
+
+            self.log(f"Looking for AMI with name pattern: {ami_name_pattern}")
+
+            # Query EC2 for AMIs matching the pattern
+            response = self.ec2_client.describe_images(
+                Filters=[
+                    {'Name': 'name', 'Values': [ami_name_pattern]},
+                    {'Name': 'owner-alias', 'Values': ['amazon']}
+                ]
+            )
+
+            if not response['Images']:
+                raise EKSClientError(f"No AMI found for {ami_type} K8s {k8s_version} release {release_date}")
+
+            ami = response['Images'][0]
+            description = ami.get('Description', '')
+
+            self.log(f"Found AMI: {ami['ImageId']}, description: {description}")
+
+            # Extract K8s patch version from description
+            k8s_match = re.search(r'k8s:\s*([0-9]+\.[0-9]+\.[0-9]+)', description)
+            if k8s_match:
+                full_k8s_version = k8s_match.group(1)
+                release_version = f"{full_k8s_version}-{release_date}"
+                self.log(f"Extracted release version: {release_version}")
+                return release_version
+
+            # Fallback: construct from k8s_version without patch (less accurate)
+            self.log(f"Could not extract K8s patch version, using {k8s_version}.0-{release_date}")
+            return f"{k8s_version}.0-{release_date}"
+
+        except ClientError as e:
+            raise EKSClientError(f"Failed to get release version for date: {e}")
+        except EKSClientError:
+            raise
+        except Exception as e:
+            raise EKSClientError(f"Failed to get release version for date: {e}")
+

@@ -780,22 +780,27 @@ class AlignCommand:
             # AWS CLI compatible configuration
             aws_config = alignment.nodegroup_config.copy()
             
-            # Get the actual AMI release version from AWS SSM/EC2
+            # Get the actual AMI release version for the selected release date
             try:
-                # Initialize EKS client to get actual release version
+                # Initialize EKS client to get release version
                 eks_client = EKSClient(
                     profile=aws_profile,
                     region=aws_region,
                     verbose=False
                 )
-                
-                actual_release_version, ami_id = eks_client.get_actual_ami_release_version(
-                    alignment.k8s_version, 
-                    aws_config.get("amiType")
+
+                # Extract release date from ami_release_version (e.g., "20250519" or "v20250519")
+                release_date = alignment.ami_release_version.lstrip('v')
+
+                # Get the full release version for this specific date
+                actual_release_version = eks_client.get_release_version_for_date(
+                    alignment.k8s_version,
+                    aws_config.get("amiType"),
+                    release_date
                 )
-                
+
                 formatter.print_status(f"Using actual AMI release version: {actual_release_version}", 'info')
-                
+
             except Exception as e:
                 formatter.print_status(f"Warning: Could not get actual AMI release version: {e}", 'warning')
                 formatter.print_status(f"Using alignment release version: {alignment.release_tag}", 'info')
