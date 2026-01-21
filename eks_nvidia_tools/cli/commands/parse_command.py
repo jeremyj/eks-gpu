@@ -12,7 +12,8 @@ from core.ami_resolver import EKSAMIResolver, AMIResolutionError
 from models.ami_types import AMIType, Architecture, AMITypeManager
 
 from ..shared.arguments import (
-    add_architecture_args, add_kubernetes_args, add_driver_args, add_output_args, add_aws_args
+    add_architecture_args, add_kubernetes_args, add_driver_args, add_output_args, add_aws_args,
+    add_deprecation_args
 )
 from ..shared.output import OutputFormatter
 from ..shared.validation import (
@@ -63,6 +64,7 @@ class ParseCommand:
             help='AMI type to search (default: both for architecture)'
         )
         add_architecture_args(ami_group)
+        add_deprecation_args(ami_group)
         
         # Output options
         output_group = parser.add_argument_group('Output Options')
@@ -114,7 +116,8 @@ class ParseCommand:
             
             # Determine AMI types to search
             ami_type_strings = self._get_ami_types(
-                args.ami_type, architecture, ami_manager, formatter
+                args.ami_type, architecture, ami_manager, formatter,
+                include_deprecated=args.show_deprecated
             )
             if not ami_type_strings:
                 return 1
@@ -221,20 +224,21 @@ class ParseCommand:
             formatter.print_status(f"Error listing versions: {e}", 'error')
             return 1
     
-    def _get_ami_types(self, ami_type_arg: str, architecture: str, 
-                      ami_manager: AMITypeManager, formatter: OutputFormatter) -> Optional[List[str]]:
+    def _get_ami_types(self, ami_type_arg: str, architecture: str,
+                      ami_manager: AMITypeManager, formatter: OutputFormatter,
+                      include_deprecated: bool = False) -> Optional[List[str]]:
         """Get AMI types to search based on arguments."""
         try:
             arch = Architecture.from_string(architecture)
-            
+
             if ami_type_arg == 'both':
-                ami_types = ami_manager.get_ami_types_for_architecture(arch)
+                ami_types = ami_manager.get_ami_types_for_architecture(arch, include_deprecated=include_deprecated)
                 return [ami_type.value for ami_type in ami_types]
             else:
                 # Validate AMI type matches architecture
-                compatible_types = ami_manager.get_ami_types_for_architecture(arch)
+                compatible_types = ami_manager.get_ami_types_for_architecture(arch, include_deprecated=include_deprecated)
                 compatible_strings = [ami_type.value for ami_type in compatible_types]
-                
+
                 if ami_type_arg not in compatible_strings:
                     formatter.print_status(
                         f"AMI type {ami_type_arg} may not be compatible with architecture {architecture}",
@@ -244,9 +248,9 @@ class ParseCommand:
                         f"Compatible AMI types for {architecture}: {', '.join(compatible_strings)}",
                         'info'
                     )
-                
+
                 return [ami_type_arg]
-                
+
         except ValueError as e:
             formatter.print_status(str(e), 'error')
             return None

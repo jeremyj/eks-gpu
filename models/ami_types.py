@@ -112,12 +112,17 @@ class AMITypeManager:
             )
         }
     
-    def get_ami_types_for_architecture(self, architecture: Architecture) -> List[AMIType]:
+    def get_ami_types_for_architecture(self, architecture: Architecture, include_deprecated: bool = True) -> List[AMIType]:
         """Get compatible AMI types for a specific architecture."""
         if architecture == Architecture.ARM64:
-            return [AMIType.AL2023_ARM_64_NVIDIA]
+            types = [AMIType.AL2023_ARM_64_NVIDIA]
         else:  # x86_64 or amd64
-            return [AMIType.AL2023_X86_64_NVIDIA, AMIType.AL2_X86_64_GPU]
+            types = [AMIType.AL2023_X86_64_NVIDIA, AMIType.AL2_X86_64_GPU]
+
+        if not include_deprecated:
+            types = [t for t in types if not self._compatibility_matrix[t].is_deprecated]
+
+        return types
     
     def get_recommended_ami_type(self, architecture: Architecture, k8s_version: str = None) -> AMIType:
         """Get the recommended AMI type for an architecture and K8s version."""

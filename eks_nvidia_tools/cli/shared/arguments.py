@@ -104,11 +104,21 @@ def validate_k8s_version(version: str) -> bool:
 def validate_architecture(arch: str) -> bool:
     """
     Validate architecture string.
-    
+
     Args:
         arch: Architecture string to validate
-    
+
     Returns:
         True if valid, False otherwise
     """
     return arch in ['x86_64', 'arm64']
+
+
+def add_deprecation_args(parser: argparse.ArgumentParser) -> None:
+    """Add deprecation filter arguments to a parser."""
+    parser.add_argument(
+        '--show-deprecated',
+        action='store_true',
+        default=False,
+        help='Include deprecated AMI types (e.g., AL2) in results'
+    )

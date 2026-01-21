@@ -253,6 +253,7 @@ eks-nvidia-tools parse [options]
 --driver-version VERSION       # NVIDIA driver version to search (supports major-only: 550, 570)
 --architecture {x86_64,arm64}  # Target architecture
 --ami-type TYPE                # Specific AMI type to search
+--show-deprecated              # Include deprecated AMI types (e.g., AL2) in results
 --fuzzy                        # Use fuzzy matching for driver search
 --latest                       # Find latest release for K8s version
 --list-versions                # List all available K8s versions
@@ -373,8 +374,8 @@ eks-nvidia-tools parse --k8s-version 1.32
 eks-nvidia-tools parse --k8s-version 1.32 --architecture x86_64
 
 # Supported AMI types:
-# - AL2023_x86_64_NVIDIA (recommended)
-# - AL2_x86_64_GPU (deprecated)
+# - AL2023_x86_64_NVIDIA (recommended, shown by default)
+# - AL2_x86_64_GPU (deprecated, use --show-deprecated to include)
 
 # Common instance types: g4dn.*, g5.*, p3.*, p4d.*
 ```
