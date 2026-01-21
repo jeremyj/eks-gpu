@@ -19,6 +19,7 @@ from .commands.align_command import AlignCommand
 from .commands.template_command import TemplateCommand
 from .commands.version_command import VersionCommand
 from .commands.search_command import SearchCommand
+from .commands.inspect_command import InspectCommand
 
 
 class EKSNvidiaToolsCLI:
@@ -31,6 +32,7 @@ class EKSNvidiaToolsCLI:
             'align': AlignCommand(),
             'template': TemplateCommand(),
             'search': SearchCommand(),
+            'inspect': InspectCommand(),
             'version': VersionCommand()
         }
     
@@ -46,6 +48,7 @@ Examples:
   eks-nvidia-tools align --strategy ami-first --cluster-name my-cluster
   eks-nvidia-tools template --generate --architecture arm64
   eks-nvidia-tools search --driver-version 570
+  eks-nvidia-tools inspect --cluster-name my-cluster
   eks-nvidia-tools version
             """
         )

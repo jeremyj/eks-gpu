@@ -25,6 +25,7 @@ class NodegroupInfo:
     subnets: List[str]
     capacity_type: str
     version: str
+    release_version: str
     labels: Dict[str, str]
     taints: List[Dict[str, Any]]
     tags: Dict[str, str]
@@ -53,6 +54,7 @@ class NodegroupInfo:
             "subnets": self.subnets,
             "instanceTypes": self.instance_types,
             "amiType": self.ami_type,
+            "releaseVersion": self.release_version,
             "capacityType": self.capacity_type,
             "diskSize": self.disk_size,
             "scalingConfig": self.scaling_config,
@@ -201,6 +203,7 @@ class EKSClient:
                 subnets=ng.get('subnets', []),
                 capacity_type=ng.get('capacityType', 'ON_DEMAND'),
                 version=ng.get('version', ''),
+                release_version=ng.get('releaseVersion', ''),
                 labels=ng.get('labels', {}),
                 taints=ng.get('taints', []),
                 tags=ng.get('tags', {}),

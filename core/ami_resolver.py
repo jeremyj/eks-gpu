@@ -301,12 +301,12 @@ class EKSAMIResolver:
     def get_ami_compatibility_matrix(self) -> Dict[str, Dict]:
         """
         Get the compatibility matrix for all AMI types.
-        
+
         Returns:
             Dictionary with compatibility information for all AMI types
         """
         matrix = {}
-        
+
         for ami_type in AMIType:
             compatibility = self.ami_manager.get_compatibility_info(ami_type)
             matrix[ami_type.value] = {
@@ -316,5 +316,85 @@ class EKSAMIResolver:
                 'deprecation_date': compatibility.deprecation_date,
                 'replacement_ami_type': compatibility.replacement_ami_type.value if compatibility.replacement_ami_type else None
             }
-        
+
         return matrix
+
+    def get_driver_for_release_version(self, release_version: str, ami_type: AMIType) -> Optional[str]:
+        """
+        Get driver version for a specific EKS release version.
+
+        Args:
+            release_version: EKS release version (e.g., "1.32.3-20250519")
+            ami_type: AMI type
+
+        Returns:
+            Driver version string or None if not found
+
+        Raises:
+            AMIResolutionError: If resolution fails
+        """
+        # Parse release_version: "1.32.3-20250519" -> k8s="1.32", date="20250519"
+        if not release_version or '-' not in release_version:
+            self.log(f"Invalid release version format: {release_version}")
+            return None
+
+        parts = release_version.split('-')
+        if len(parts) != 2:
+            self.log(f"Could not parse release version: {release_version}")
+            return None
+
+        k8s_full_version = parts[0]  # e.g., "1.32.3"
+        release_date = parts[1]  # e.g., "20250519"
+
+        # Extract major.minor k8s version
+        k8s_parts = k8s_full_version.split('.')
+        if len(k8s_parts) < 2:
+            self.log(f"Could not parse K8s version: {k8s_full_version}")
+            return None
+
+        k8s_version = f"{k8s_parts[0]}.{k8s_parts[1]}"  # e.g., "1.32"
+
+        # Fetch release by tag
+        release_tag = f"v{release_date}"
+        self.log(f"Looking up release {release_tag} for K8s {k8s_version}")
+
+        try:
+            from core.github_client import GitHubAPIError
+            release = self.github_client.get_release_by_tag(release_tag)
+        except GitHubAPIError as e:
+            raise AMIResolutionError(f"Failed to fetch release {release_tag}: {e}")
+
+        if not release:
+            self.log(f"Release {release_tag} not found")
+            return None
+
+        body = release.get('body', '')
+        if not body:
+            self.log(f"Release {release_tag} has no body")
+            return None
+
+        try:
+            # Parse the release body
+            k8s_sections = self.html_parser.parse_release_body(body, release_tag)
+        except ReleaseParsingError as e:
+            self.log(f"Failed to parse {release_tag}: {e}")
+            return None
+
+        # Look for the specified Kubernetes version
+        if k8s_version not in k8s_sections:
+            self.log(f"K8s version {k8s_version} not found in release {release_tag}")
+            return None
+
+        packages = k8s_sections[k8s_version]
+
+        # Try different package key formats
+        key_with_type = f"kmod-nvidia-latest-dkms_{ami_type.value}"
+        if key_with_type in packages:
+            return packages[key_with_type]
+
+        # Try without suffix (backward compatibility)
+        if "kmod-nvidia-latest-dkms" in packages:
+            return packages["kmod-nvidia-latest-dkms"]
+
+        self.log(f"No driver version found for {ami_type.value} in {release_tag}")
+        return None

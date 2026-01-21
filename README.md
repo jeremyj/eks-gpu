@@ -220,6 +220,7 @@ The unified CLI provides four main commands:
 | `align` | Align NVIDIA drivers between AMIs and containers | `align --strategy ami-first` |
 | `template` | Generate and validate nodegroup templates | `template --generate --architecture arm64` |
 | `search` | Search NVIDIA CUDA repository for driver packages | `search --driver-version 570` |
+| `inspect` | Inspect EKS nodegroups and report NVIDIA driver versions | `inspect --cluster-name my-cluster` |
 | `version` | Show version and capability information | `version --verbose` |
 
 ### Basic Command Structure
@@ -345,6 +346,26 @@ eks-nvidia-tools search --driver-version VERSION [options]
 --architecture, --arch ARCH    # x86_64 or arm64 (default: x86_64)
 --os-version, -o VERSION       # OS version (default: ubuntu2204)
                                # Format: {distro}{version} e.g., ubuntu2204, debian12, rhel9
+--output {table,json,yaml}     # Output format
+--quiet, -q                    # Suppress progress output
+```
+
+### Inspect Command
+
+Inspect EKS nodegroups and report their NVIDIA driver versions based on the AMI release version.
+
+```bash
+# Basic usage
+eks-nvidia-tools inspect --cluster-name CLUSTER [options]
+
+# Required options:
+--cluster-name NAME            # EKS cluster name
+
+# Optional options:
+--nodegroup-name NAME          # Specific nodegroup to inspect (default: all GPU nodegroups)
+--all-nodegroups               # Include non-GPU nodegroups in inspection
+--profile PROFILE              # AWS profile (default: default)
+--region REGION                # AWS region (default: eu-west-1)
 --output {table,json,yaml}     # Output format
 --quiet, -q                    # Suppress progress output
 ```
