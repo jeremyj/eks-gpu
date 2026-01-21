@@ -228,22 +228,51 @@ def validate_aws_profile(profile: str) -> str:
 def validate_output_format(format_type: str) -> str:
     """
     Validate output format.
-    
+
     Args:
         format_type: Output format to validate
-    
+
     Returns:
         Validated format string
-    
+
     Raises:
         ValidationError: If format is invalid
     """
     valid_formats = ['table', 'json', 'yaml']
-    
+
     if format_type not in valid_formats:
         raise ValidationError(
             f"Invalid output format: {format_type}. "
             f"Valid formats: {', '.join(valid_formats)}"
         )
-    
+
     return format_type
+
+
+def validate_os_version(os_version: str) -> str:
+    """
+    Validate OS version format for NVIDIA repository.
+
+    Args:
+        os_version: OS version string to validate (e.g., ubuntu2204, debian12, rhel9)
+
+    Returns:
+        Validated OS version string
+
+    Raises:
+        ValidationError: If OS version format is invalid
+    """
+    if not os_version:
+        raise ValidationError("OS version cannot be empty")
+
+    # Pattern: {distro}{version} where distro is ubuntu, debian, or rhel
+    pattern = r'^(ubuntu|debian|rhel)\d+$'
+
+    if not re.match(pattern, os_version.lower()):
+        raise ValidationError(
+            f"Invalid OS version format: {os_version}. "
+            "Expected format: {distro}{version} (e.g., ubuntu2204, debian12, rhel9). "
+            "Supported distros: ubuntu, debian, rhel"
+        )
+
+    return os_version.lower()

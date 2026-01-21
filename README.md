@@ -219,6 +219,7 @@ The unified CLI provides four main commands:
 | `parse` | Parse EKS AMI releases and find NVIDIA driver versions | `parse --k8s-version 1.32` |
 | `align` | Align NVIDIA drivers between AMIs and containers | `align --strategy ami-first` |
 | `template` | Generate and validate nodegroup templates | `template --generate --architecture arm64` |
+| `search` | Search NVIDIA CUDA repository for driver packages | `search --driver-version 570` |
 | `version` | Show version and capability information | `version --verbose` |
 
 ### Basic Command Structure
@@ -325,6 +326,26 @@ eks-nvidia-tools template [operation] [options]
 # Output:
 --output-file FILE             # Output template file
 --output {table,json,yaml}     # Output format
+```
+
+### Search Command
+
+Search the NVIDIA CUDA repository for driver packages (libnvidia-compute, libnvidia-encode, libnvidia-decode).
+
+```bash
+# Basic usage
+eks-nvidia-tools search --driver-version VERSION [options]
+
+# Required options:
+--driver-version, -d VERSION   # NVIDIA driver version (e.g., 570, 560.35, 570.124.06)
+
+# Optional options:
+--package-type, -p TYPE        # compute, encode, decode, or all (default: all)
+--architecture, --arch ARCH    # x86_64 or arm64 (default: x86_64)
+--os-version, -o VERSION       # OS version (default: ubuntu2204)
+                               # Format: {distro}{version} e.g., ubuntu2204, debian12, rhel9
+--output {table,json,yaml}     # Output format
+--quiet, -q                    # Suppress progress output
 ```
 
 ### Version Command

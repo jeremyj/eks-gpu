@@ -2,5 +2,5 @@
 EKS NVIDIA Tools - Unified CLI for EKS AMI and NVIDIA Driver Management
 """
 
-__version__ = "1.1.1"
+__version__ = "1.2.0"
 __author__ = "Jeremy J. Rossi"
