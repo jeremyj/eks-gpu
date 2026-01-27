@@ -26,22 +26,39 @@ def collect_pod_metrics(
     pod_dimensions = client.list_metric_dimensions("pod_cpu_utilization", cluster_dims)
 
     # Extract unique pods with their dimensions
-    pods = []
+    # Only include dimension sets with FullPodName (skip aggregated metrics)
+    # Use dict keyed by FullPodName to deduplicate
+    pods_dict: dict[str, dict] = {}
     for dims in pod_dimensions:
-        pod_info = {"name": None, "namespace": None, "node": None, "dimensions": dims}
+        pod_info = {
+            "name": None,
+            "full_name": None,
+            "namespace": None,
+            "node": None,
+            "dimensions": dims,
+        }
         for dim in dims:
             if dim["Name"] == "PodName":
                 pod_info["name"] = dim["Value"]
+            elif dim["Name"] == "FullPodName":
+                pod_info["full_name"] = dim["Value"]
             elif dim["Name"] == "Namespace":
                 pod_info["namespace"] = dim["Value"]
             elif dim["Name"] == "NodeName":
                 pod_info["node"] = dim["Value"]
 
-        if pod_info["name"] and pod_info["namespace"]:
-            # Apply namespace filter
-            if namespace_filter and pod_info["namespace"] not in namespace_filter:
-                continue
-            pods.append(pod_info)
+        # Skip aggregated metrics (no FullPodName) and incomplete data
+        if not pod_info["name"] or not pod_info["namespace"] or not pod_info["full_name"]:
+            continue
+
+        # Apply namespace filter
+        if namespace_filter and pod_info["namespace"] not in namespace_filter:
+            continue
+
+        # Deduplicate by FullPodName
+        pods_dict[pod_info["full_name"]] = pod_info
+
+    pods = list(pods_dict.values())
 
     if not quiet:
         print(f"Found {len(pods)} pods")
@@ -128,7 +145,7 @@ def collect_pod_metrics(
                 period,
                 ["Average"],
             )
-            rx_avg = round((rx_stats.get("avg") or 0) / period)
+            rx_avg = round(rx_stats.get("avg") or 0)  # already bytes/sec
 
         # Network TX - get specific dimensions
         tx_avg = 0
@@ -149,12 +166,12 @@ def collect_pod_metrics(
                 period,
                 ["Average"],
             )
-            tx_avg = round((tx_stats.get("avg") or 0) / period)
+            tx_avg = round(tx_stats.get("avg") or 0)  # already bytes/sec
 
         pod_metric = {
-            "name": pod_name,
+            "name": pod_info["full_name"],
             "namespace": namespace,
-            "workload": extract_workload_name(pod_name),
+            "workload": extract_workload_name(pod_info["full_name"]),
             "node": pod_info["node"],
             "cpu": {
                 "avg": round(cpu_stats.get("avg") or 0, 2),

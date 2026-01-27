@@ -162,8 +162,8 @@ def collect_node_metrics(
                 "min": round(memory_stats.get("min") or 0, 2),
             },
             "network_bytes_sec": {
-                "avg": round((network_stats.get("avg") or 0) / period, 0),
-                "max": round((network_stats.get("max") or 0) / period, 0),
+                "avg": round(network_stats.get("avg") or 0, 0),  # already bytes/sec
+                "max": round(network_stats.get("max") or 0, 0),
             },
             "pod_count": {"avg": round(pod_stats.get("avg") or 0, 1)},
         }
@@ -179,7 +179,7 @@ def collect_node_metrics(
         if memory_stats.get("max") is not None:
             all_memory_max.append(memory_stats["max"])
         if network_stats.get("avg") is not None:
-            all_network_avg.append(network_stats["avg"] / period)
+            all_network_avg.append(network_stats["avg"])  # already bytes/sec
 
     # Calculate summary
     summary = {

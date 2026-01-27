@@ -38,7 +38,65 @@ class CloudWatchClient:
         period: int,
         statistics: list[str],
     ) -> dict[str, float | None]:
-        """Get metric statistics from CloudWatch."""
+        """Get metric statistics from CloudWatch, auto-chunking if needed."""
+        max_datapoints = 1440
+        total_seconds = (end_time - start_time).total_seconds()
+        expected_datapoints = total_seconds / period
+
+        # If within limit, single query
+        if expected_datapoints <= max_datapoints:
+            return self._query_metric_statistics(
+                metric_name, dimensions, start_time, end_time, period, statistics
+            )
+
+        # Chunk the time range
+        chunk_seconds = max_datapoints * period
+        all_datapoints = []
+        current_start = start_time
+
+        while current_start < end_time:
+            current_end = min(current_start + timedelta(seconds=chunk_seconds), end_time)
+            response = self.cloudwatch.get_metric_statistics(
+                Namespace=self.NAMESPACE,
+                MetricName=metric_name,
+                Dimensions=dimensions,
+                StartTime=current_start,
+                EndTime=current_end,
+                Period=period,
+                Statistics=statistics,
+            )
+            all_datapoints.extend(response.get("Datapoints", []))
+            current_start = current_end
+
+        if not all_datapoints:
+            return {stat.lower(): None for stat in statistics}
+
+        result = {}
+        for stat in statistics:
+            values = [dp[stat] for dp in all_datapoints if stat in dp]
+            if not values:
+                result[stat.lower()] = None
+            elif stat == "Average":
+                result["avg"] = sum(values) / len(values)
+            elif stat == "Maximum":
+                result["max"] = max(values)
+            elif stat == "Minimum":
+                result["min"] = min(values)
+            elif stat == "Sum":
+                result["sum"] = sum(values)
+
+        return result
+
+    def _query_metric_statistics(
+        self,
+        metric_name: str,
+        dimensions: list[dict],
+        start_time: datetime,
+        end_time: datetime,
+        period: int,
+        statistics: list[str],
+    ) -> dict[str, float | None]:
+        """Single query for metric statistics."""
         response = self.cloudwatch.get_metric_statistics(
             Namespace=self.NAMESPACE,
             MetricName=metric_name,

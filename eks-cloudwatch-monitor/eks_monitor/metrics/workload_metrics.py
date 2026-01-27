@@ -53,9 +53,10 @@ def collect_workload_metrics(
     pod_dimensions = client.list_metric_dimensions("pod_cpu_utilization", cluster_dims)
 
     # Group pods by workload, storing their full dimensions
+    # Only include dimension sets with FullPodName (skip aggregated metrics)
     workloads: dict[str, dict[str, Any]] = defaultdict(
         lambda: {
-            "pods": [],
+            "pods": {},  # Use dict keyed by FullPodName to deduplicate
             "namespace": None,
         }
     )
@@ -63,26 +64,32 @@ def collect_workload_metrics(
     # Extract pod info from dimensions
     for dims in pod_dimensions:
         pod_name = None
+        full_pod_name = None
         namespace = None
 
         for dim in dims:
             if dim["Name"] == "PodName":
                 pod_name = dim["Value"]
+            elif dim["Name"] == "FullPodName":
+                full_pod_name = dim["Value"]
             elif dim["Name"] == "Namespace":
                 namespace = dim["Value"]
 
-        if not pod_name or not namespace:
+        # Skip aggregated metrics (no FullPodName) and incomplete data
+        if not pod_name or not namespace or not full_pod_name:
             continue
 
         # Apply namespace filter
         if namespace_filter and namespace not in namespace_filter:
             continue
 
-        workload_name = extract_workload_name(pod_name)
+        # Use FullPodName for workload extraction (has hash suffixes)
+        workload_name = extract_workload_name(full_pod_name)
         key = f"{namespace}/{workload_name}"
 
         workloads[key]["namespace"] = namespace
-        workloads[key]["pods"].append({"name": pod_name, "dimensions": dims})
+        # Deduplicate by FullPodName
+        workloads[key]["pods"][full_pod_name] = {"name": pod_name, "dimensions": dims}
 
     if not quiet:
         print(f"Found {len(workloads)} workloads")
@@ -103,7 +110,7 @@ def collect_workload_metrics(
         network_rx_avgs = []
         network_tx_avgs = []
 
-        for pod_info in workload_data["pods"]:
+        for full_pod_name, pod_info in workload_data["pods"].items():
             pod_name = pod_info["name"]
             dims = pod_info["dimensions"]
 
@@ -187,7 +194,7 @@ def collect_workload_metrics(
                     ["Average"],
                 )
                 if rx_stats.get("avg") is not None:
-                    network_rx_avgs.append(rx_stats["avg"] / period)
+                    network_rx_avgs.append(rx_stats["avg"])  # already bytes/sec
 
             # Network TX - get specific dimensions
             tx_dims_list = client.list_metric_dimensions(
@@ -208,7 +215,7 @@ def collect_workload_metrics(
                     ["Average"],
                 )
                 if tx_stats.get("avg") is not None:
-                    network_tx_avgs.append(tx_stats["avg"] / period)
+                    network_tx_avgs.append(tx_stats["avg"])  # already bytes/sec
 
         # Aggregate workload metrics
         workload_metric = {
