@@ -65,6 +65,7 @@ JSON report with:
 ## Cron Example
 
 ```bash
-# Run daily at 6am
-0 6 * * * /usr/local/bin/eks-monitor analyze --cluster-name prod --output-dir /var/reports --quiet
+# Run daily at 6am, collecting previous 24h at 1-minute resolution
+# Note: % must be escaped as \% in crontab
+0 6 * * * /usr/local/bin/eks-monitor analyze --cluster-name prod --hours 24 --end-time $(date -u +\%Y-\%m-\%dT00:00:00) --period 60 --output-dir /var/reports --quiet
 ```
