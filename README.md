@@ -288,7 +288,7 @@ eks-nvidia-tools align --strategy STRATEGY [options]
 --extract-from-cluster CLUSTER # Extract nodegroup configurations from existing cluster
 --extract-nodegroups NAME [NAME...] # Specific nodegroups to extract (optional)
 --target-cluster CLUSTER      # Target cluster for new configurations (optional)
---new-nodegroup-suffix SUFFIX # Custom suffix for new nodegroup names (optional)
+--new-nodegroup-suffix SUFFIX # Custom suffix for new nodegroup names (default: random hex)
 
 # Strategy-specific options:
 --current-driver-version VER   # Required for container-first strategy

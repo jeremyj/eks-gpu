@@ -113,7 +113,7 @@ Examples:
         extract_group.add_argument(
             '--new-nodegroup-suffix',
             default=None,
-            help='Suffix to add to generated nodegroup names (default: timestamp in format -YYYY-MM-DDTHH-MM-SS)'
+            help='Suffix to add to generated nodegroup names (default: random 4-char hex, e.g., -a3f7)'
         )
         
         # Nodegroup configuration
@@ -613,9 +613,8 @@ Examples:
             
             # Generate timestamp suffix if none provided
             if args.new_nodegroup_suffix is None:
-                from datetime import datetime
-                timestamp = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
-                nodegroup_suffix = f'-{timestamp}'
+                import os
+                nodegroup_suffix = f'-{os.urandom(2).hex()}'
             else:
                 nodegroup_suffix = args.new_nodegroup_suffix
             
@@ -785,11 +784,9 @@ Examples:
         # Start with the extracted nodegroup template
         merged_config = ng.to_template_dict()
         
-        # Get base nodegroup name without any existing timestamp suffix
-        import re
-        base_name = ng.nodegroup_name
-        # Remove any existing timestamp pattern (YYYY-MM-DDTHH-MM-SS)
-        base_name = re.sub(r'-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}$', '', base_name)
+        # Get base nodegroup name without any existing auto-generated suffix
+        from utils.naming_utils import strip_nodegroup_suffix
+        base_name = strip_nodegroup_suffix(ng.nodegroup_name)
         
         # Update with alignment-specific settings
         merged_config['clusterName'] = target_cluster
